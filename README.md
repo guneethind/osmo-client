@@ -7,6 +7,8 @@ exposure and format settings, camera status, and a gallery to preview and downlo
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
+![Osmo Client: live view, shutter, capture modes and camera settings](screenshots/main-app.png)
+
 ## Features
 
 - **Live view** of the camera.
@@ -33,6 +35,27 @@ part; the commands were mapped on the Osmo Nano and only the Nano has been teste
 supported.
 
 Need the camera as a webcam for video calls? See the companion app, **OsmoCam**.
+
+## Screenshots
+
+**Gallery**: the camera's files by day, ready to download to the PC.
+
+![Gallery](screenshots/gallery.png)
+
+**Preview** of a video (low-resolution proxy) before downloading it.
+
+![Video preview](screenshots/video-playback.png)
+
+**Settings and status**: exposure, format, storage, battery and the technical details panel.
+
+<p>
+  <img src="screenshots/camera-settings.png" alt="Camera, exposure and format settings" width="400">
+  <img src="screenshots/live-camera-info.png" alt="Storage, battery and technical details" width="400">
+</p>
+
+**Cameras**: link one or more cameras and switch between them.
+
+![Cameras panel](screenshots/add-cameras.png)
 
 ## Requirements
 
