@@ -56,6 +56,8 @@ async def run(args: argparse.Namespace) -> None:
     if args.off:
         app.want_link.clear()
     link: ble.BleLink | None = None
+    session: datalink.Datalink | None = None
+    task: asyncio.Future | None = None
     joined = False                   # the PC's Wi-Fi was moved to the camera (so disconnecting restores it)
 
     def wanted() -> bool:
@@ -175,13 +177,22 @@ async def run(args: argparse.Namespace) -> None:
                 await release()          # another camera picked: drop this one before connecting
             if not stop.is_set():
                 await pause(1)
+    except asyncio.CancelledError:
+        log("Ctrl+C: stopping...")
+        raise
     finally:
-        stop.set()
+        # End the live view session first: its thread would otherwise keep Python from exiting.
         app.datalink = None
+        if session is not None:
+            session.stop()
+        if task is not None and not task.done():
+            await asyncio.wait({task}, timeout=2)
+        stop.set()
         if joined:
-            wifi.restore(home, args.interface)
+            await asyncio.to_thread(wifi.restore, home, args.interface)
         if link is not None:
-            await link.close()
+            with contextlib.suppress(Exception):
+                await link.close()
         log("Stopped.")
 
 
