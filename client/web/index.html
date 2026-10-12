@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Osmo Client</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10; --surface: #14171c; --surface-2: #1b1f26; --border: #262b33; --border-2: #323843;
+    --text: #e8eaed; --muted: #8b929c; --faint: #5d6470;
+    --accent: #5eb1ff; --rec: #ff453a; --ok: #30d158; --warn: #ffd60a;
+    --radius: 14px;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.45 system-ui, "Segoe UI", sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* header */
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+  .brand { font-weight: 650; letter-spacing: .01em; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 9px; border-radius: 999px;
+          background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .pill[data-tone=ok] .dot { background: var(--ok); }
+  .pill[data-tone=warn] .dot { background: var(--warn); }
+  .pill[data-tone=rec] { color: var(--text); }
+  .pill[data-tone=rec] .dot { background: var(--rec); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .spacer { flex: 1; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .chip svg { width: 22px; height: 22px; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .power { display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px 6px 10px; border-radius: 999px;
+           border: 1px solid var(--border-2); background: var(--surface); color: var(--muted); font-size: 13px;
+           font-weight: 550; cursor: pointer; transition: color .12s, border-color .12s, background .12s; }
+  .power svg { width: 16px; height: 16px; }
+  .power:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+  .power[data-on=false] { color: #0b0d10; background: var(--ok); border-color: var(--ok); }
+  .power[data-on=false]:hover:not(:disabled) { color: #0b0d10; filter: brightness(1.08); }
+  .power:disabled { opacity: .5; cursor: default; }
+  .brand { white-space: nowrap; }
+  @media (max-width: 640px) {
+    header { gap: 8px; padding: 10px 12px; }
+    #storageChip { display: none !important; }
+    #powerText { display: none; }
+    .power { padding: 7px; }
+  }
+  .veil-btn { margin-top: 16px; font: inherit; font-weight: 600; padding: 10px 22px; border-radius: 999px; border: 0;
+              background: var(--ok); color: #0b0d10; cursor: pointer; }
+  .veil-btn:hover { filter: brightness(1.08); }
+
+  /* layout */
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 20px;
+         width: 100%; max-width: 1440px; margin: 0 auto; align-items: start; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+
+  /* viewer */
+  .viewer { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden;
+            border: 1px solid var(--border); }
+  .viewer img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .hud { position: absolute; top: 12px; display: flex; gap: 8px; align-items: center; }
+  .hud.left { left: 12px; } .hud.right { right: 12px; }
+  .tag { background: rgba(10, 12, 15, .72); backdrop-filter: blur(6px); border-radius: 8px; padding: 5px 10px;
+         font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
+  .tag.muted { color: #c7ccd3; font-weight: 500; }
+  .tag.rec { background: rgba(255, 69, 58, .92); color: #fff; }
+  .tag.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: blink 1s steps(2) infinite; }
+  .tag.busy { background: rgba(255, 214, 10, .92); color: #1a1600; }
+  .veil { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px;
+          background: radial-gradient(ellipse at center, rgba(20, 23, 28, .86), rgba(8, 9, 11, .94)); }
+  .veil h2 { margin: 12px 0 4px; font-size: 17px; font-weight: 600; }
+  .veil p { margin: 0; color: var(--muted); max-width: 420px; }
+  .spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--border-2); border-top-color: var(--accent);
+             animation: spin .9s linear infinite; margin: 0 auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  .flash.go { animation: flash .45s ease-out; }
+  @keyframes flash { 0% { opacity: .85; } 100% { opacity: 0; } }
+  [hidden] { display: none !important; }
+
+  /* deck: modes + shutter */
+  .deck { margin-top: 16px; display: grid; gap: 16px; }
+  .modes { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; width: 100%; max-width: 720px; margin: 0 auto; }
+  @media (max-width: 640px) { .modes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .mode { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0;
+          padding: 10px 6px 9px; border-radius: 12px; border: 1px solid transparent; background: transparent;
+          color: var(--muted); cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+  .mode svg { width: 22px; height: 22px; }
+  .mode span { font-size: 12.5px; font-weight: 550; white-space: nowrap; }
+  .mode:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+  .mode[aria-pressed=true] { background: var(--surface-2); border-color: var(--border-2); color: var(--text); }
+  .mode[aria-pressed=true] svg { color: var(--accent); }
+  .mode.pending { border-color: var(--accent); border-style: dashed; color: var(--text); }
+  .mode:disabled { cursor: default; opacity: .45; }
+  .mode kbd { font: 10px var(--mono); color: var(--faint); }
+
+  .shutter-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 20px; }
+  .readout .big { font-size: 22px; font-weight: 600; }
+  .readout .small { color: var(--muted); font-size: 12.5px; }
+  .readout.right { text-align: left; }
+  .readout.left { text-align: right; }
+  .shutter { width: 76px; height: 76px; border-radius: 50%; border: 4px solid #e8eaed; background: transparent;
+             display: grid; place-items: center; cursor: pointer; padding: 0; transition: transform .08s, opacity .15s; }
+  .shutter:active:not(:disabled) { transform: scale(.94); }
+  .shutter:disabled { opacity: .35; cursor: default; }
+  .shutter i { display: block; width: 58px; height: 58px; border-radius: 50%; background: var(--rec);
+               transition: width .18s, height .18s, border-radius .18s, background .18s; }
+  .shutter[data-kind=photo] i { background: #f2f3f5; }
+  .shutter[data-kind=stop] i { width: 28px; height: 28px; border-radius: 6px; }
+  .shutter[data-kind=wait] i { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .hint { text-align: center; color: var(--faint); font-size: 12px; }
+  .hint kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--border-2); border-radius: 4px; color: var(--muted); }
+
+  /* side panel */
+  aside { display: grid; gap: 12px; min-width: 0; }
+  section { min-width: 0; }
+  .card { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .rows { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+  .rows dt { color: var(--muted); }
+  .rows dd { margin: 0; text-align: right; font-weight: 550; font-variant-numeric: tabular-nums; }
+  .rows dd small { color: var(--faint); font-weight: 400; }
+  .bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 2px 0 10px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .4s; }
+  .bar.ok i { background: var(--ok); } .bar.warn i { background: var(--warn); } .bar.low i { background: var(--rec); }
+  .headline { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .headline .big { font-size: 24px; font-weight: 650; }
+  .headline .small { color: var(--muted); font-size: 12.5px; }
+  .note { color: var(--faint); font-size: 12px; margin: 8px 0 0; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; margin-bottom: 12px;
+         border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+  .seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 8px; border-radius: 7px;
+                font-weight: 550; cursor: pointer; transition: background .12s, color .12s; }
+  .seg button:hover:not(:disabled) { color: var(--text); }
+  .seg button[aria-pressed=true] { background: var(--border-2); color: var(--text); }
+  .seg button:disabled { cursor: default; opacity: .5; }
+  .field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px; }
+  .field label { color: var(--muted); }
+  .field select { width: 100%; font: inherit; font-weight: 550; font-variant-numeric: tabular-nums; color: var(--text);
+                  background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+  .field select:disabled { opacity: .5; cursor: default; }
+  .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 190px; overflow-y: auto; }
+  .log li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 13px; }
+  .log time { color: var(--faint); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
+  .log .err { color: #ff8a80; } .log .ok::before { content: "✓ "; color: var(--ok); } .log .info { color: var(--muted); }
+  .log .empty { color: var(--faint); grid-template-columns: 1fr; }
+
+  details.card summary { cursor: pointer; list-style: none; font-size: 12px; font-weight: 600; letter-spacing: .06em;
+                         text-transform: uppercase; color: var(--muted); }
+  details.card summary::-webkit-details-marker { display: none; }
+  details.card summary::before { content: "▸ "; } details.card[open] summary::before { content: "▾ "; }
+  .tech h4 { margin: 14px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .hexgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; font: 11px var(--mono); }
+  .hexgrid span { text-align: center; padding: 3px 0; border-radius: 4px; background: var(--surface-2); color: var(--faint); }
+  .hexgrid span.f { color: var(--text); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .topics { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+  .topics td { padding: 5px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  .topics td:first-child { color: var(--text); padding-right: 8px; overflow-wrap: anywhere; }
+  .topics td:last-child { width: 52px; text-align: right; color: var(--faint); }
+  .topics code { font: 11px var(--mono); color: var(--faint); word-break: break-all; display: block; margin-top: 2px; }
+  .topics code b { color: var(--warn); font-weight: 400; }
+
+  /* camera picker */
+  .cam-btn { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 9px; border-radius: 10px;
+             border: 1px solid transparent; background: transparent; color: var(--text); cursor: pointer; min-width: 0; }
+  .cam-btn:hover { background: var(--surface); border-color: var(--border); }
+  .cam-btn svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+  .cam-btn b { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .cam-btn small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .cam-btn .caret { color: var(--faint); font-size: 11px; }
+  .cams { width: min(560px, 100%); max-height: 85vh; overflow-y: auto; }
+  @media (max-width: 760px) {
+    .cam-btn { flex-shrink: 0; padding-right: 8px; } .cam-btn small { display: none; } .cam-btn b { max-width: 130px; }
+    #connText { display: none; } #conn { padding: 6px; }
+  }
+  @media (max-width: 540px) { .cam-btn b { max-width: 96px; } .tabs button { padding: 4px 9px; } .cam-btn .caret { display: none; } }
+  .cam-row .acts { align-items: center; }
+  .cams h4 { margin: 16px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cam-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 12px;
+             border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); margin-bottom: 8px; }
+  .cam-row.active { border-color: var(--accent); }
+  .cam-row .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cam-row .who span { color: var(--muted); font-size: 12.5px; }
+  .cam-row .acts { display: flex; gap: 6px; }
+  .tag-mini { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+              background: var(--border-2); color: var(--muted); margin-left: 6px; vertical-align: 1px; }
+  .tag-mini.ok { background: rgba(48, 209, 88, .16); color: var(--ok); }
+  .tag-mini.warn { background: rgba(255, 214, 10, .14); color: var(--warn); }
+  .cam-stage { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+  .cam-stage.err { color: #ff8a80; }
+  .cams .empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+
+  /* tabs */
+  .tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface);
+          border: 1px solid var(--border); }
+  .tabs button { border: 0; background: transparent; color: var(--muted); padding: 4px 13px; border-radius: 999px;
+                 font-size: 13px; font-weight: 550; cursor: pointer; }
+  .tabs button:hover { color: var(--text); }
+  .tabs button[aria-selected=true] { background: var(--border-2); color: var(--text); }
+
+  /* gallery */
+  .gallery { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: 20px; }
+  .gal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .gal-bar .seg { margin: 0; grid-template-columns: repeat(3, auto); }
+  .gal-bar .seg button { padding: 5px 12px; }
+  .gal-info { color: var(--muted); font-size: 13px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 9px; font-size: 13px;
+         font-weight: 550; border: 1px solid var(--border-2); background: var(--surface); color: var(--text); cursor: pointer; }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn svg { width: 15px; height: 15px; }
+  .gal-day { margin: 18px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .gal-day small { font-weight: 400; color: var(--faint); letter-spacing: 0; text-transform: none; margin-left: 6px; }
+  .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .tile { min-width: 0; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+  .tile.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .thumb { position: relative; aspect-ratio: 16 / 9; background: #000; cursor: zoom-in; }
+  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .thumb .dur, .thumb .badge { position: absolute; bottom: 6px; font-size: 11.5px; font-weight: 600; padding: 2px 6px;
+                               border-radius: 6px; background: rgba(10, 12, 15, .75); }
+  .thumb .dur { right: 6px; }
+  .thumb .badge { left: 6px; color: var(--ok); }
+  .thumb .pick { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 6px; cursor: pointer;
+                 display: grid; place-items: center; background: rgba(10, 12, 15, .6); border: 1.5px solid rgba(255, 255, 255, .7); }
+  .tile.sel .pick { background: var(--accent); border-color: var(--accent); }
+  .tile.sel .pick::after { content: "✓"; color: #06121f; font-size: 13px; font-weight: 800; }
+  .thumb .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0, 0, 0, .5); }
+  .thumb .prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  .meta { display: flex; align-items: center; gap: 8px; padding: 7px 9px; font-size: 12.5px; }
+  .meta b { font-weight: 600; }
+  .meta span { color: var(--muted); }
+  .meta .spacer { flex: 1; }
+  .icon-btn { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; border: 0; padding: 0;
+              background: transparent; color: var(--muted); cursor: pointer; }
+  .icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+  .icon-btn:disabled { opacity: .35; cursor: default; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .gal-empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+  .gal-dl { margin-bottom: 14px; }
+  .gal-dl .rows { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; }
+  .gal-dl dt { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .gal-dl dd { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  .gal-dl dd.err { color: #ff8a80; } .gal-dl dd.ok { color: var(--ok); }
+  .gal-dl .bar { grid-column: 1 / -1; margin: 0 0 4px; height: 4px; }
+  .gal-dl .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .gal-dl .head h3 { margin: 0; flex: 1; }
+  .lightbox { position: fixed; inset: 0; z-index: 20; background: rgba(4, 5, 7, .9); display: grid; place-items: center; padding: 24px; }
+  .lb-inner { width: min(1100px, 100%); display: grid; gap: 12px; }
+  .lb-media { background: #000; border-radius: 12px; overflow: hidden; display: grid; place-items: center; max-height: 75vh; }
+  .lb-media video, .lb-media img { width: 100%; max-height: 75vh; object-fit: contain; display: block; }
+  .lb-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .lb-bar .info { flex: 1; min-width: 0; }
+  .lb-bar .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-bar .info span { color: var(--muted); font-size: 12.5px; }
+  @media (max-width: 640px) { .gallery { padding: 12px; } .gal-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; } }
+
+  .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px); opacity: 0;
+           background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 16px;
+           box-shadow: 0 10px 30px rgba(0, 0, 0, .45); transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.err { border-color: #6b2a27; }
+</style>
+</head>
+<body>
+<header>
+  <button class="cam-btn" id="camBtn" title="Choose or link cameras">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="6.5" width="13" height="11" rx="2.5"/><circle cx="9.5" cy="12" r="3"/><path d="M16 10l5-2.5v9L16 14"/></svg>
+    <b id="camName">DJI Osmo</b><small id="camModel"></small><span class="caret">▾</span>
+  </button>
+  <span class="pill" id="conn" data-tone="warn"><span class="dot"></span><span id="connText">Connecting…</span></span>
+  <nav class="tabs" role="tablist" aria-label="View">
+    <button id="tabCam" role="tab" aria-selected="true">Camera</button>
+    <button id="tabGal" role="tab" aria-selected="false">Gallery</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="chip" id="storageChip" hidden title="Free storage">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 7v2M12 7v2M15 7v2"/></svg>
+    <b class="num" id="storageChipText"></b>
+  </span>
+  <span class="chip" id="battChip" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="7" width="17" height="10" rx="2.2"/><path d="M21.5 10.5v3"/><rect id="battFill" x="4.5" y="9" width="13" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
+    <b class="num" id="battChipText"></b>
+  </span>
+  <button class="power" id="power" data-on="true" title="Release the camera and put the PC's Wi-Fi back on your network">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg>
+    <span id="powerText">Disconnect</span>
+  </button>
+</header>
+
+<main>
+  <section>
+    <div class="viewer">
+      <img id="view" alt="Camera live view">
+      <div class="flash" id="flash"></div>
+      <div class="hud left"><span class="tag" id="recTag" hidden></span></div>
+      <div class="hud right">
+        <span class="tag muted num" id="expoTag" hidden title="Manual exposure"></span>
+        <span class="tag muted" id="modeTag" hidden></span>
+        <span class="tag muted num" id="qualityTag" hidden title="Estimated from the storage the camera reserves"></span>
+      </div>
+      <div class="veil" id="veil">
+        <div>
+          <div class="spinner" id="veilSpin"></div>
+          <h2 id="veilTitle">Connecting to the camera…</h2>
+          <p id="veilText">Pairing over Bluetooth and joining its Wi-Fi network.</p>
+          <button class="veil-btn" id="veilBtn" hidden>Connect</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="modes" id="modes" role="group" aria-label="Capture mode"></div>
+      <div class="shutter-row">
+        <div class="readout left"><div class="big num" id="remainBig">—</div><div class="small" id="remainSmall">remaining</div></div>
+        <button class="shutter" id="shutter" data-kind="video" aria-label="Record" disabled><i></i></button>
+        <div class="readout right"><div class="big num" id="timer">00:00</div><div class="small" id="timerSmall">recorded</div></div>
+      </div>
+      <div class="hint"><kbd>Space</kbd> shutter · <kbd>1</kbd>–<kbd>6</kbd> capture mode</div>
+    </div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <h3>Camera</h3>
+      <dl class="rows">
+        <dt>Mode</dt><dd id="cMode">—</dd>
+        <dt>Quality</dt><dd id="cQuality">—</dd>
+        <dt>Bitrate</dt><dd id="cBitrate">—</dd>
+        <dt>ISO</dt><dd id="cIso">—</dd>
+        <dt>Shutter</dt><dd id="cShutter">—</dd>
+      </dl>
+      <p class="note" id="expoNote" hidden>The camera is not publishing exposure data in this session.</p>
+    </div>
+
+    <div class="card">
+      <h3>Exposure</h3>
+      <div class="seg" role="group" aria-label="Exposure mode">
+        <button id="eAuto" aria-pressed="false" disabled>Auto</button>
+        <button id="eManual" aria-pressed="false" disabled>Manual</button>
+      </div>
+      <div class="field">
+        <label for="eIso">ISO</label><select id="eIso" disabled><option value="" hidden>—</option></select>
+        <label for="eShutter">Shutter</label><select id="eShutter" disabled><option value="" hidden>—</option></select>
+        <label for="eWb">White balance</label><select id="eWb" disabled><option value="" hidden>—</option></select>
+      </div>
+      <p class="note" id="eNote">Reading the camera's exposure…</p>
+    </div>
+
+    <div class="card">
+      <h3>Format</h3>
+      <div class="field" id="fmtVideo">
+        <label for="vRes">Resolution</label><select id="vRes" disabled><option value="" hidden>—</option></select>
+        <label for="vFps">FPS</label><select id="vFps" disabled><option value="" hidden>—</option></select>
+      </div>
+      <div class="field" id="fmtSlow" hidden>
+        <label for="vSlow">Slow motion</label><select id="vSlow" disabled><option value="" hidden>—</option></select>
+      </div>
+      <div class="field" id="fmtPhoto" hidden>
+        <label for="pFmt">Photo</label><select id="pFmt" disabled><option value="" hidden>—</option></select>
+      </div>
+      <p class="note" id="vNote">Changing the format interrupts the live view for a few seconds.</p>
+    </div>
+
+    <div class="card">
+      <h3>Storage</h3>
+      <div class="headline"><span class="big num" id="sFree">—</span><span class="small num" id="sTotal"></span></div>
+      <div class="bar" id="sBar"><i style="width:0"></i></div>
+      <dl class="rows">
+        <dt>Video remaining</dt><dd id="sTime">—</dd>
+        <dt>Photos remaining</dt><dd id="sShots">—</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>Battery</h3>
+      <div class="headline"><span class="big num" id="bPct">—</span><span class="small" id="bState"></span></div>
+      <div class="bar ok" id="bBar"><i style="width:0"></i></div>
+      <dl class="rows">
+        <dt>Voltage</dt><dd id="bVolt">—</dd>
+        <dt>Temperature</dt><dd id="bTemp">—</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>Activity</h3>
+      <ul class="log" id="log"><li class="empty">No activity yet.</li></ul>
+    </div>
+
+    <details class="card tech" id="tech">
+      <summary>Technical details</summary>
+      <h4>Status push 02/80</h4>
+      <div class="hexgrid" id="hexgrid"></div>
+      <div class="legend" id="legend"></div>
+      <h4>Status topics (00/99) <span id="topicCount" style="font-weight:400;color:var(--faint)"></span></h4>
+      <table class="topics" id="topics"></table>
+    </details>
+  </aside>
+</main>
+
+<section class="gallery" id="gallery" hidden>
+  <div class="gal-bar">
+    <div class="seg" id="galFilter" role="group" aria-label="Type">
+      <button data-f="all" aria-pressed="true">All</button>
+      <button data-f="video" aria-pressed="false">Videos</button>
+      <button data-f="photo" aria-pressed="false">Photos</button>
+    </div>
+    <span class="gal-info num" id="galInfo">—</span>
+    <span class="spacer"></span>
+    <button class="btn" id="galRefresh" title="Read the camera's files again (pauses the live view for a few seconds)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>Refresh</button>
+    <button class="btn" id="galSelect">Select new</button>
+    <button class="btn primary" id="galDownload" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span id="galDownloadText">Download</span></button>
+    <button class="btn" id="galFolder" title="Open the downloads folder in File Explorer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2h10V19H3z"/></svg>Open folder</button>
+  </div>
+  <div class="card gal-dl" id="galDl" hidden>
+    <div class="head"><h3>Downloads</h3><span class="gal-info num" id="galDlInfo"></span>
+      <button class="btn" id="galDlClear">Clear finished</button></div>
+    <dl class="rows" id="galDlRows"></dl>
+  </div>
+  <div id="galBody"></div>
+  <p class="gal-empty" id="galEmpty">Open the gallery to read the camera's files.</p>
+</section>
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lb-inner">
+    <div class="lb-media" id="lbMedia"></div>
+    <div class="lb-bar">
+      <div class="info"><b id="lbName"></b><span id="lbInfo"></span></div>
+      <button class="btn primary" id="lbDownload">Download to PC</button>
+      <button class="btn" id="lbClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="camPanel" hidden>
+  <div class="card cams">
+    <div class="headline"><h3 style="margin:0">Cameras</h3>
+      <span class="spacer"></span>
+      <button class="btn" id="camScan">Search again</button>
+      <button class="btn" id="camClose">Close</button></div>
+    <p class="note" id="camTested"></p>
+    <div class="cam-stage" id="camStage" hidden></div>
+    <h4>Your cameras</h4>
+    <div id="camKnown"></div>
+    <h4>Nearby <span id="camScanning" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)"></span></h4>
+    <div id="camNearby"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// Number and date formatting. The UI text is English; translations can come later.
+const LOCALE = 'en-US';
+const ICON = {
+  photo: '<path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/>',
+  video: '<rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3z"/>',
+  night: '<path d="M19.5 14.5A7.5 7.5 0 1 1 9.5 4.5a6 6 0 0 0 10 10z"/><path d="M17 3.5v3M15.5 5h3"/>',
+  slow:  '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l-4.5-4.5"/><circle cx="12" cy="17" r="1"/>',
+  lapse: '<path d="M6 3h12M6 21h12M8 3c0 6 8 6 8 9s-8 3-8 9M16 3c0 6-8 6-8 9s8 3 8 9"/>',
+  hyper: '<path d="M3 12h8M8 7l5 5-5 5M14 7l5 5-5 5"/>',
+};
+const MODES = [
+  { p: 0x05, name: 'Photo', icon: ICON.photo },
+  { p: 0x01, name: 'Video', icon: ICON.video },
+  { p: 0x28, name: 'Super Night', icon: ICON.night },
+  { p: 0x00, name: 'Slow-mo', icon: ICON.slow },
+  { p: 0x02, name: 'Timelapse', icon: ICON.lapse },
+  { p: 0x0a, name: 'Hyperlapse', icon: ICON.hyper },
+];
+const FIELDS = [  // fields of the 02/80 status push (see docs/PROTOCOL.md)
+  [0, 4, 'state (bits)', '#5eb1ff'], [4, 5, 'camera mode', '#bf5af2'], [5, 9, 'total MB', '#64d2ff'],
+  [9, 13, 'free MB', '#30d158'], [13, 17, 'photos left', '#ffd60a'], [17, 21, 'seconds left', '#ff9f0a'],
+  [29, 33, 'seconds recorded', '#ff453a'], [57, 58, 'capture mode', '#ff6482'],
+];
+
+const $ = id => document.getElementById(id);
+const nf = new Intl.NumberFormat(LOCALE);
+let S = null;            // last /api/status
+let busy = false;        // a command is in flight
+let linkBusy = false;    // the connect / disconnect request is in flight
+let pendingMode = null;
+let lastCommand = 0;     // Date.now() of our last command
+let prev = { rec: null, mode: null, photoBusy: false };
+
+// ---- formatting
+const pad = n => String(n).padStart(2, '0');
+function clock(s) {
+  s = Math.max(0, s | 0);
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return (h ? h + ':' + pad(m) : pad(m)) + ':' + pad(s % 60);
+}
+function duration(s) {
+  if (s == null) return '—';
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (h) return `${h} h ${pad(m)} min`;
+  return m ? `${m} min` : `${s} s`;
+}
+const gb = mb => (mb / 1024).toLocaleString(LOCALE, { maximumFractionDigits: mb < 10240 ? 1 : 0 }) + ' GB';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// ---- activity log + toast
+const logEl = $('log');
+function activity(text, kind = 'info') {
+  if (logEl.querySelector('.empty')) logEl.innerHTML = '';
+  const li = document.createElement('li');
+  const now = new Date();
+  li.innerHTML = `<time>${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</time><span class="${kind}">${esc(text)}</span>`;
+  logEl.prepend(li);
+  while (logEl.children.length > 40) logEl.lastChild.remove();
+}
+let toastTimer;
+function toast(text, err = false) {
+  const t = $('toast');
+  t.textContent = text;
+  t.className = 'toast show' + (err ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = 'toast' + (err ? ' err' : ''), 2600);
+}
+
+// ---- capture mode buttons
+const modesEl = $('modes');
+MODES.forEach((m, i) => {
+  const b = document.createElement('button');
+  b.className = 'mode';
+  b.dataset.p = m.p;
+  b.setAttribute('aria-pressed', 'false');
+  b.setAttribute('aria-label', m.name);
+  b.title = `${m.name} (key ${i + 1})`;
+  b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${m.icon}</svg><span>${m.name}</span><kbd>${i + 1}</kbd>`;
+  b.onclick = () => setMode(m);
+  modesEl.appendChild(b);
+});
+
+// ---- commands
+async function command(path, label) {
+  busy = true; lastCommand = Date.now(); render();
+  try {
+    const r = await (await fetch(path, { method: 'POST' })).json();
+    lastCommand = Date.now();
+    if (r.ok) activity(label, 'ok');
+    else { activity(`${label}: ${r.error}`, 'err'); toast(`${label}: ${r.error}`, true); }
+    return r;
+  } catch (e) {
+    activity(`${label}: the app did not respond`, 'err');
+    return { ok: false };
+  } finally {
+    busy = false; render();
+  }
+}
+async function setMode(m) {
+  if (!ready() || busy || S.capture_mode === m.p || isRecording()) return;
+  pendingMode = m.p; render();
+  await command('/api/mode/' + m.p, `Mode → ${m.name}`);
+  pendingMode = null; render();
+}
+async function shutter() {
+  if (!ready() || busy) return;
+  const st = S.record ? S.record.state : 'idle';
+  if (st === 'stopping') return;
+  // 'starting' can last ~5 s (timelapse); the camera accepts a stop during it.
+  if (st === 'recording' || st === 'starting') return command('/api/record/stop', 'Stop recording');
+  if (S.photo_mode) {
+    const r = await command('/api/photo', 'Photo');
+    if (r.ok) { const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+    return;
+  }
+  return command('/api/record/start', 'Record');
+}
+$('shutter').onclick = shutter;
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, select, summary') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (tab !== 'cam' || !$('lightbox').hidden || !$('camPanel').hidden) return;
+  if (e.code === 'Space') { e.preventDefault(); shutter(); }
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1]);
+});
+
+// ---- connect / disconnect
+async function setLink(on) {
+  if (linkBusy) return;
+  if (!on && isRecording() && !confirm('The camera is recording. Disconnect anyway? (it keeps recording)')) return;
+  linkBusy = true; render();
+  try {
+    await fetch('/api/link/' + (on ? 'on' : 'off'), { method: 'POST' });
+    activity(on ? 'Connecting to the camera' : 'Disconnected: camera released', 'info');
+  } finally { linkBusy = false; render(); }
+}
+// ---- exposure (per capture mode; ISO and shutter only in Manual)
+let OPTS = null;  // /api/exposure/options
+async function loadOptions() {
+  try {
+    OPTS = await (await fetch('/api/exposure/options', { cache: 'no-store' })).json();
+  } catch (e) { setTimeout(loadOptions, 1000); return; }
+  // The hidden first option shows values that aren't in the list (Auto, or one set on the camera).
+  $('eIso').innerHTML = '<option value="" hidden>—</option>' +
+    OPTS.iso.map(o => `<option value="${o.code}">${nf.format(o.value)}</option>`).join('');
+  $('eShutter').innerHTML = '<option value="" hidden>—</option>' +
+    OPTS.shutter.map(o => `<option value="${o.raw}">${esc(o.label)} s</option>`).join('');
+  fillSelect($('eWb'), [['auto', 'Auto'], ...OPTS.wb_kelvin.map(k => [k, nf.format(k) + ' K'])], 'wb');
+  fillSelect($('vSlow'), OPTS.slowmo.map(o => [o.res + ':' + o.fps, o.label]), 'slow');
+  fillSelect($('pFmt'), OPTS.photo_formats.map(o => [o.size + ':' + o.ratio, o.label]), 'photo');
+  render();
+}
+// (Re)build a select's options only when the set changes (they depend on the capture mode/resolution),
+// and never while the user has it open.
+function fillSelect(sel, items, key) {
+  if (sel.dataset.key === key || document.activeElement === sel) return;
+  sel.dataset.key = key;
+  sel.innerHTML = '<option value="" hidden>—</option>' + items.map(([v, label]) => `<option value="${v}">${esc(label)}</option>`).join('');
+}
+const fpsLabel = c => { const o = OPTS && OPTS.fps.find(o => o.code === +c); return o ? o.value + ' fps' : 'code ' + c; };
+function postJSON(path, body, label) {
+  busy = true; lastCommand = Date.now(); render();
+  return fetch(path, { method: 'POST', body: JSON.stringify(body) }).then(r => r.json()).then(r => {
+    if (r.ok) activity(label, 'ok'); else { activity(`${label}: ${r.error}`, 'err'); toast(`${label}: ${r.error}`, true); }
+    return r;
+  }).catch(() => activity(`${label}: the app did not respond`, 'err')).finally(() => { busy = false; lastCommand = Date.now(); render(); });
+}
+$('vRes').onchange = e => {
+  e.target.blur();
+  const res = +e.target.value, set = S && S.settings, mf = OPTS.mode_formats[S.capture_mode];
+  if (!mf || !set) return;
+  const fpsList = OPTS.limited_fps[res] || mf.fps;
+  const fps = fpsList.includes(set.fps_code) ? set.fps_code : Math.max(...fpsList.filter(c => c <= (set.fps_code || 2)), fpsList[0]);
+  postJSON('/api/video-format', { res, fps }, `Resolution → ${OPTS.resolutions[res]} · ${fpsLabel(fps)}`);
+};
+$('vFps').onchange = e => {
+  e.target.blur();
+  const set = S && S.settings;
+  if (set && set.resolution_code != null) postJSON('/api/video-format', { res: set.resolution_code, fps: +e.target.value }, `FPS → ${fpsLabel(e.target.value)}`);
+};
+$('vSlow').onchange = e => {
+  e.target.blur();
+  const [res, fps] = e.target.value.split(':').map(Number);
+  const o = OPTS.slowmo.find(o => o.res === res && o.fps === fps);
+  postJSON('/api/video-format', { res, fps }, `Slow motion → ${o ? o.label : e.target.value}`);
+};
+$('pFmt').onchange = e => {
+  e.target.blur();
+  const [size, ratio] = e.target.value.split(':').map(Number);
+  const o = OPTS.photo_formats.find(o => o.size === size && o.ratio === ratio);
+  postJSON('/api/photo-format', { size, ratio }, `Photo → ${o ? o.label : e.target.value}`);
+};
+$('eWb').onchange = e => {
+  e.target.blur();
+  const v = e.target.value;
+  postJSON('/api/wb', v === 'auto' ? { mode: 'auto' } : { mode: 'manual', kelvin: +v },
+    v === 'auto' ? 'White balance → Auto' : `White balance → ${nf.format(+v)} K`);
+};
+async function setExposure(mode) {
+  if (!ready() || busy || !S.settings || S.settings.mode === mode) return;
+  await command('/api/exposure/' + mode, mode === 'manual' ? 'Exposure → Manual' : 'Exposure → Auto');
+}
+$('eAuto').onclick = () => setExposure('auto');
+$('eManual').onclick = () => setExposure('manual');
+$('eIso').onchange = e => {
+  const o = OPTS && OPTS.iso.find(o => String(o.code) === e.target.value);
+  e.target.blur();
+  if (o) command('/api/iso/' + o.code, `ISO → ${nf.format(o.value)}`);
+};
+$('eShutter').onchange = e => {
+  const o = OPTS && OPTS.shutter.find(o => String(o.raw) === e.target.value);
+  e.target.blur();
+  if (o) command('/api/shutter/' + o.raw, `Shutter → ${o.label} s`);
+};
+function syncSelect(sel, value, label, disabled) {
+  sel.disabled = disabled;
+  if (document.activeElement === sel) return;   // don't fight a dropdown the user has open
+  const known = value != null && [...sel.options].some(o => o.value === String(value));
+  if (known) sel.value = String(value);
+  else { sel.options[0].textContent = label; sel.value = ''; }
+}
+
+$('power').onclick = () => setLink(S && S.link === 'off');
+$('veilBtn').onclick = () => (S && S.link === 'select') ? openCams() : setLink(true);
+
+// ---- cameras: pick / link / forget (one active at a time)
+let CAMS = null, camAutoOpened = false, camTimer = null;
+const STAGES = {
+  searching: 'Looking for the camera over Bluetooth…',
+  connecting: 'Connecting over Bluetooth…',
+  approve: 'Approve “OSMO” on the camera screen to link it.',
+  credentials: 'Asking for its Wi-Fi details…',
+  wifi: 'Joining the camera’s Wi-Fi…',
+  datalink: 'Opening the link to the camera…',
+};
+const POWER = { awake: 'on', asleep: 'asleep', unknown: 'nearby' };
+function openCams() { $('camPanel').hidden = false; pollCams(); }
+function closeCams() { $('camPanel').hidden = true; clearTimeout(camTimer); }
+$('camBtn').onclick = openCams;
+$('camClose').onclick = closeCams;
+$('camPanel').addEventListener('click', e => { if (e.target === $('camPanel')) closeCams(); });
+$('camScan').onclick = () => fetch('/api/cameras/scan', { method: 'POST' }).then(pollCams);
+async function pollCams() {
+  clearTimeout(camTimer);
+  try { CAMS = await (await fetch('/api/cameras', { cache: 'no-store' })).json(); } catch (e) { CAMS = null; }
+  renderCams();
+  if (!$('camPanel').hidden) camTimer = setTimeout(pollCams, 1000);
+}
+// Only touch the DOM when something visible changed: rebuilding the buttons every second would
+// swallow clicks that land mid-rebuild.
+function setHTML(el, html) { if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; } }
+const signal = r => r == null ? null : r >= -60 ? 'good signal' : r >= -75 ? 'fair signal' : 'weak signal';
+function camLine(c) {
+  const bits = [c.model || 'DJI Osmo'];
+  if (c.connected) bits.push('connected');
+  else if (c.active && CAMS.link === 'connecting') bits.push('connecting…');
+  else if (c.seen) bits.push(POWER[c.power] || 'nearby');
+  else bits.push('not found right now');
+  return bits.join(' · ');
+}
+function renderCams() {
+  if (!CAMS) return;
+  $('camTested').textContent = `Tested only with the ${CAMS.tested_models.join(', ')}. Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 3/4) use the same protocol and may work fully or in part; the Osmo 360 does not.`;
+  const st = CAMS.stage, stEl = $('camStage');
+  stEl.hidden = !st || st === 'on';
+  stEl.className = 'cam-stage' + (st === 'error' ? ' err' : '');
+  stEl.textContent = st === 'error' ? 'Could not connect: ' + (CAMS.stage_error || 'error') : (STAGES[st] || '');
+  const untested = c => c.tested ? '' : '<span class="tag-mini warn">untested</span>';
+  setHTML($('camKnown'), CAMS.known.length ? CAMS.known.map(c => `
+    <div class="cam-row${c.active ? ' active' : ''}">
+      <div class="who"><b>${esc(c.name || c.address)}${untested(c)}</b><span>${esc(camLine(c))}</span></div>
+      <div class="acts">${c.connected ? '<span class="tag-mini ok">active</span>' : `<button class="btn primary" data-connect="${c.address}">Connect</button>`}
+        <button class="btn" data-forget="${c.address}" title="Forget this camera on this PC">Forget</button></div>
+    </div>`).join('') : '<div class="empty">You have not linked a camera yet.</div>');
+  setHTML($('camNearby'), CAMS.nearby.length ? CAMS.nearby.map(c => `
+    <div class="cam-row">
+      <div class="who"><b>${esc(c.name || c.address)}${untested(c)}<span class="tag-mini">new</span></b>
+        <span>${esc([c.model, POWER[c.power] || null, signal(c.rssi)].filter(Boolean).join(' · '))}</span></div>
+      <div class="acts">${c.unsupported ? `<span class="tag-mini">${esc(c.unsupported)}</span>` : `<button class="btn primary" data-connect="${c.address}">Link</button>`}</div>
+    </div>`).join('')
+    : `<div class="empty">${CAMS.scanning ? 'Looking for DJI Osmo cameras nearby… (turn yours on and bring it closer)' : CAMS.link === 'on' ? 'Press “Search again” to see other cameras nearby.' : 'No new cameras nearby.'}</div>`);
+  $('camScanning').textContent = CAMS.scanning ? '· searching…' : '';
+  $('camScan').disabled = CAMS.scanning || CAMS.link !== 'on';
+}
+$('camPanel').addEventListener('click', async e => {
+  const c = e.target.closest('[data-connect]'), f = e.target.closest('[data-forget]');
+  if (c) {
+    const known = CAMS && CAMS.known.some(k => k.address === c.dataset.connect);
+    const r = await (await fetch('/api/cameras/connect', { method: 'POST', body: JSON.stringify({ address: c.dataset.connect }) })).json();
+    if (!r.ok) toast(r.error, true);
+    else activity(known ? 'Connecting to the camera…' : 'Linking a new camera: approve “OSMO” on its screen', 'info');
+    pollCams();
+  } else if (f) {
+    const cam = CAMS && CAMS.known.find(k => k.address === f.dataset.forget);
+    if (!confirm(`Forget ${cam ? cam.name : 'this camera'} on this PC? To use it again you will have to link it again.`)) return;
+    await fetch('/api/cameras/forget', { method: 'POST', body: JSON.stringify({ address: f.dataset.forget }) });
+    pollCams();
+  }
+});
+
+
+// ---- state helpers
+const ready = () => S && S.link === 'on' && S.connected && S.fresh && !S.playback;
+const isRecording = () => S && S.record && S.record.state !== 'idle';
+
+// ---- render
+function render() {
+  const s = S;
+  // connection pill
+  let tone = 'warn', text = 'Connecting…';
+  const off = s && s.link === 'off';
+  const select = s && s.link === 'select';
+  const act = s && s.active;
+  $('camName').textContent = act ? act.name : 'Choose a camera';
+  $('camModel').textContent = act ? act.model + (act.tested ? '' : ' · untested') : '';
+  if (select && !camAutoOpened) { camAutoOpened = true; openCams(); }
+  const cam = s && s.camera;  // sleep state from the BLE advertisement (only watched while disconnected)
+  if (select) { tone = ''; text = 'No camera'; }
+  else if (off) { tone = ''; text = 'Disconnected' + (cam ? (cam.power === 'asleep' ? ' · camera asleep' : cam.power === 'awake' ? ' · camera on' : '') : ''); }
+  else if (s && s.connected && s.fresh) {
+    if (s.playback) { tone = 'warn'; text = 'In the gallery'; }
+    else if (isRecording()) { tone = 'rec'; text = 'Recording'; }
+    else { tone = 'ok'; text = 'Connected'; }
+  } else if (s && s.connected) text = 'Waiting for status…';
+  else if (!s) { tone = ''; text = 'App stopped'; }
+  $('conn').dataset.tone = tone; $('connText').textContent = text;
+
+  // veil over the viewer
+  let veil = null;
+  if (!s) veil = ['The app is not responding', 'Start Osmo Client (osmo-client.bat) and reload this page.', false];
+  else if (off) {
+    const wifi = s.home ? ` The PC's Wi-Fi is back on “${s.home}”.` : '';
+    if (!cam) veil = ['Disconnected', 'Looking for the camera over Bluetooth… If it does not show up, it is fully off or too far away.' + wifi, true];
+    else if (cam.power === 'asleep') veil = ['Camera asleep', 'Connecting wakes it up.' + wifi, false];
+    else veil = ['Disconnected', 'The camera is on and free (you can use the phone app or the dock). If nobody uses it, it goes to sleep by itself.' + wifi, false];
+  }
+  else if (select) veil = ['Choose a camera', 'Find and link a DJI Osmo camera nearby (turn it on and bring it close to the PC).', false];
+  else if (s.stage === 'approve') veil = ['Approve “OSMO” on the camera', 'The camera asks for permission to link with this PC: confirm it on its screen.', true];
+  else if (s.stage === 'error' && !s.connected) veil = ['Could not connect', s.stage_error || 'Retrying…', true];
+  else if (!s.connected) veil = ['Connecting to ' + (act ? act.name : 'the camera') + '…', STAGES[s.stage] || 'Pairing over Bluetooth and joining its Wi-Fi network.', true];
+  else if (s.media_state === 'listing') veil = ['Reading the gallery…', 'The live view comes back in a few seconds.', true];
+  else if (s.downloads_active && s.playback) veil = [`Downloading ${plural(s.downloads_active, 'file')} to the PC…`,
+    'The live view comes back when it finishes: without it the camera sends files about 6 times faster and stays cooler.', true];
+  else if (s.media_mode) veil = ['Leaving the gallery…', 'The live view comes back in a few seconds.', true];
+  else if (s.playback) veil = ['The camera is in playback', 'Go back to the viewfinder on the camera to get the live view back.', false];
+  else if (s.video_age == null || s.video_age > 2) veil = ['Waiting for video…', 'The link is up; the picture will arrive in a moment.', true];
+  $('veil').hidden = !veil;
+  if (veil) { $('veilTitle').textContent = veil[0]; $('veilText').textContent = veil[1]; $('veilSpin').hidden = !veil[2]; }
+  $('veilBtn').hidden = !off && !select;
+  $('veilBtn').textContent = select ? 'Choose a camera' : cam && cam.power === 'asleep' ? 'Wake up and connect' : 'Connect';
+  const pw = $('power');
+  pw.hidden = !s || select;
+  pw.dataset.on = String(!off);
+  pw.disabled = linkBusy;
+  $('powerText').textContent = off ? 'Connect' : 'Disconnect';
+  pw.title = off ? 'Connect to the camera again' : "Release the camera and put the PC's Wi-Fi back on your network";
+
+  // HUD
+  const rec = s && s.fresh && s.record;
+  const recTag = $('recTag');
+  if (rec && rec.state === 'recording') {
+    recTag.className = 'tag rec num'; recTag.innerHTML = `<span class="dot"></span>REC ${clock(rec.elapsed)}`; recTag.hidden = false;
+  } else if (rec && (rec.state === 'starting' || rec.state === 'stopping' || rec.storing || rec.photo_busy)) {
+    recTag.className = 'tag busy';
+    recTag.textContent = rec.state === 'starting' ? 'Starting…' : rec.photo_busy ? 'Shooting…' : 'Saving…';
+    recTag.hidden = false;
+  } else recTag.hidden = true;
+  const storage = s && s.storage;
+  $('modeTag').hidden = !(s && s.capture_mode_name);
+  if (s && s.capture_mode_name) $('modeTag').textContent = s.capture_mode_name;
+  $('qualityTag').hidden = !(storage && storage.quality);
+  if (storage && storage.quality) $('qualityTag').textContent = '≈ ' + storage.quality;
+
+  // capture modes
+  for (const b of modesEl.children) {
+    const p = +b.dataset.p;
+    b.setAttribute('aria-pressed', String(!!s && s.capture_mode === p && pendingMode == null));
+    b.classList.toggle('pending', pendingMode === p);
+    b.disabled = !ready() || busy || isRecording();
+  }
+
+  // shutter
+  const sh = $('shutter');
+  const st = rec ? rec.state : 'idle';
+  let kind = s && s.photo_mode ? 'photo' : 'video';
+  if (st === 'recording' || st === 'starting') kind = 'stop';
+  sh.dataset.kind = st === 'stopping' ? 'wait' : kind;
+  sh.disabled = !ready() || busy || st === 'stopping';
+  sh.setAttribute('aria-label', kind === 'stop' ? 'Stop recording' : kind === 'photo' ? 'Take photo' : 'Record');
+
+  // readouts
+  if (storage && s.photo_mode) { $('remainBig').textContent = nf.format(storage.shots_left); $('remainSmall').textContent = 'photos left'; }
+  else if (storage && storage.time_left) { $('remainBig').textContent = duration(storage.time_left); $('remainSmall').textContent = 'of video left'; }
+  else { $('remainBig').textContent = '—'; $('remainSmall').textContent = 'remaining'; }
+  $('timer').textContent = clock(rec && st !== 'idle' ? rec.elapsed : 0);
+  $('timerSmall').textContent = st === 'recording' ? 'recording' : 'recorded';
+
+  // camera card
+  $('cMode').textContent = (s && s.capture_mode_name) || '—';
+  $('cQuality').innerHTML = storage && storage.quality ? `${esc(storage.quality)} <small>estimated</small>` : '—';
+  $('cBitrate').textContent = storage && storage.bitrate ? `≈ ${storage.bitrate} Mbps` : '—';
+  // ISO / shutter in use: the status topic when the camera publishes it (real values, also in Auto),
+  // otherwise what the camera reports for Manual.
+  const ex = s && s.exposure, set = s && s.settings, manual = !!set && set.mode === 'manual';
+  const auto = !!set && set.mode === 'auto';
+  $('cIso').textContent = ex && ex.iso ? nf.format(ex.iso) : manual && set.iso ? nf.format(set.iso) : auto ? 'Auto' : '—';
+  $('cShutter').textContent = ex && ex.shutter ? ex.shutter + ' s' : manual && set.shutter ? set.shutter + ' s' : auto ? 'Auto' : '—';
+  $('expoNote').hidden = !(s && s.connected && s.fresh && !ex && !set);
+
+  // exposure card + HUD tag
+  const canExpo = ready() && !busy && !!set;
+  $('eAuto').setAttribute('aria-pressed', String(auto));
+  $('eManual').setAttribute('aria-pressed', String(manual));
+  $('eAuto').disabled = $('eManual').disabled = !canExpo;
+  syncSelect($('eIso'), manual ? set.iso_code : null,
+    manual ? (set.iso ? nf.format(set.iso) : `code ${set.iso_code}`) : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
+  syncSelect($('eShutter'), manual ? set.shutter_raw : null,
+    manual ? (set.shutter ? set.shutter + ' s' : '—') : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
+  $('eNote').textContent = !set ? (s && s.connected ? "Reading the camera's exposure…" : 'Not connected to the camera.')
+    : manual ? `Manual in ${(s.capture_mode_name || 'this mode')}: each capture mode keeps its own exposure.`
+    : 'In Auto the camera picks ISO and shutter. Switch to Manual to set them.';
+  // white balance (works with Auto exposure too)
+  syncSelect($('eWb'), set && set.wb === 'auto' ? 'auto' : set && set.wb === 'manual' ? set.wb_kelvin : null,
+    set && set.wb ? (set.wb === 'auto' ? 'Auto' : set.wb_kelvin ? nf.format(set.wb_kelvin) + ' K' : set.wb) : '—',
+    !ready() || busy || !set || !OPTS);
+
+  // format card: what the current capture mode offers
+  const mode = s && s.capture_mode, isSlow = mode === 0x00, isPhoto = !!(s && s.photo_mode);
+  const mf = OPTS && mode != null && OPTS.mode_formats[mode];
+  const fmtLock = !ready() || busy || !set || isRecording() || !OPTS;
+  $('fmtVideo').hidden = isSlow || isPhoto || !mf;
+  $('fmtSlow').hidden = !isSlow;
+  $('fmtPhoto').hidden = !isPhoto;
+  if (mf) {
+    const resNow = set && set.resolution_code;
+    fillSelect($('vRes'), mf.res.map(r => [r, OPTS.resolutions[r]]), 'res' + mode);
+    fillSelect($('vFps'), (OPTS.limited_fps[resNow] || mf.fps).map(c => [c, fpsLabel(c)]), 'fps' + mode + ':' + resNow);
+    syncSelect($('vRes'), resNow, (set && set.resolution) || (storage && storage.quality) || '—', fmtLock);
+    syncSelect($('vFps'), set && set.fps_code, set && set.fps ? set.fps + ' fps' : '—', fmtLock);
+  }
+  if (isSlow) syncSelect($('vSlow'), set && set.resolution_code != null ? set.resolution_code + ':' + set.fps_code : null,
+    (storage && storage.quality) || '—', fmtLock);
+  if (isPhoto) syncSelect($('pFmt'), set && set.photo_size_code != null ? set.photo_size_code + ':' + set.photo_ratio_code : null,
+    (set && set.photo) || (storage && storage.quality) || '—', fmtLock);
+  $('vNote').textContent = isPhoto ? 'Photo size (L 36/31 MP or M 9/8 MP) and aspect ratio.'
+    : isSlow ? 'The slow-motion factor follows the frame rate: 120 fps = 4×, 240 fps = 8× (1080p only).'
+    : mf ? 'Changing the format interrupts the live view for a few seconds.' + (mode === 0x01 ? ' 4:3 resolutions go up to 60 fps, except 1080p 4:3 (30).' : '')
+    : '—';
+  const expoTag = $('expoTag');
+  expoTag.hidden = !(manual && s.fresh);
+  if (manual) expoTag.textContent = `M · ISO ${set.iso ? nf.format(set.iso) : '?'}` + (set.shutter ? ` · ${set.shutter}` : '');
+
+  // storage card + chip
+  if (storage) {
+    const usedPct = storage.total_mb ? 100 * (1 - storage.free_mb / storage.total_mb) : 0;
+    $('sFree').textContent = gb(storage.free_mb) + ' free';
+    $('sTotal').textContent = 'of ' + gb(storage.total_mb);
+    const bar = $('sBar'); bar.className = 'bar' + (usedPct > 90 ? ' low' : usedPct > 75 ? ' warn' : '');
+    bar.firstElementChild.style.width = usedPct.toFixed(1) + '%';
+    $('sTime').textContent = storage.time_left ? duration(storage.time_left) : '—';
+    $('sShots').textContent = storage.shots_left ? nf.format(storage.shots_left) : '—';
+    $('storageChip').hidden = false; $('storageChipText').textContent = gb(storage.free_mb);
+  } else $('storageChip').hidden = true;
+
+  // battery card + chip
+  const bat = s && s.battery;
+  if (bat) {
+    $('bPct').textContent = bat.percent + ' %';
+    $('bState').textContent = bat.temp >= 60 ? 'high temperature'
+      : bat.current < -20 ? `discharging · ${-bat.current} mA` : bat.current > 20 ? `charging · ${bat.current} mA` : '';
+    const bb = $('bBar'); bb.className = 'bar ' + (bat.percent <= 15 ? 'low' : bat.percent <= 30 ? 'warn' : 'ok');
+    bb.firstElementChild.style.width = bat.percent + '%';
+    $('bVolt').textContent = (bat.voltage / 1000).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' V';
+    $('bTemp').textContent = bat.temp.toLocaleString(LOCALE, { maximumFractionDigits: 1 }) + ' °C';
+    $('battChip').hidden = false; $('battChipText').textContent = bat.percent + '%';
+    $('battFill').setAttribute('width', (13 * bat.percent / 100).toFixed(1));
+    $('battChip').title = `Battery ${bat.percent} % · ${(bat.voltage / 1000).toFixed(2)} V · ${bat.temp} °C`;
+  } else $('battChip').hidden = true;
+
+  renderHex(s ? s.raw_status : '');
+  if (tab === 'gal') $('galRefresh').disabled = (M && M.state === 'listing') || !(s && s.link === 'on' && s.connected);
+}
+
+function track(s) {
+  // Events the camera reports by itself (also when it is operated by hand). The status push lags a
+  // command's reply a little, so changes right after our own command are not reported as manual.
+  if (!s || !s.fresh || !s.record) return;
+  const st = s.record.state, ours = Date.now() - lastCommand < 4000;
+  if (prev.rec != null) {
+    if (prev.rec === 'idle' && st !== 'idle' && !ours) activity('Recording started on the camera', 'info');
+    if (prev.rec !== 'idle' && st === 'idle') activity('Recording saved', 'info');
+    if (prev.photoBusy && !s.record.photo_busy && prev.rec === 'idle') activity('Photo saved', 'info');
+    if (s.capture_mode !== prev.mode && !ours) activity(`Mode changed on the camera: ${s.capture_mode_name}`, 'info');
+  }
+  prev = { rec: st, mode: s.capture_mode, photoBusy: s.record.photo_busy };
+}
+
+// ---- technical details
+const hexEl = $('hexgrid');
+for (let i = 0; i < 60; i++) hexEl.appendChild(document.createElement('span'));
+$('legend').innerHTML = FIELDS.map(f => `<span><i style="background:${f[3]}"></i>${f[2]}</span>`).join('');
+function renderHex(hex) {
+  if (!$('tech').open) return;
+  for (let i = 0; i < 60; i++) {
+    const cell = hexEl.children[i];
+    const f = FIELDS.find(f => i >= f[0] && i < f[1]);
+    cell.textContent = hex ? hex.substr(i * 2, 2) : '··';
+    cell.className = f ? 'f' : '';
+    cell.style.boxShadow = f ? `inset 0 -2px 0 ${f[3]}` : '';
+    cell.title = `byte ${i}` + (f ? ` · ${f[2]}` : '');
+  }
+}
+let topicPrev = {};
+async function pollTopics() {
+  if ($('tech').open) {
+    try {
+      const t = await (await fetch('/api/topics', { cache: 'no-store' })).json();
+      const names = Object.keys(t);
+      $('topicCount').textContent = names.length ? `· ${names.length}` : '';
+      $('topics').innerHTML = names.length ? names.map(n => {
+        const d = t[n].data, old = topicPrev[n] || d;
+        let html = '';
+        for (let i = 0; i < d.length; i += 2) {
+          const b = d.substr(i, 2);
+          html += b !== old.substr(i, 2) ? `<b>${b}</b>` : b;
+        }
+        return `<tr><td>${esc(n)}<code>${html}</code></td><td class="num">${t[n].count}</td></tr>`;
+      }).join('') : '<tr><td style="color:var(--faint)">The camera is not publishing topics in this session.</td></tr>';
+      topicPrev = Object.fromEntries(names.map(n => [n, t[n].data]));
+    } catch (e) { /* app restarting */ }
+  }
+  setTimeout(pollTopics, 1000);
+}
+$('tech').addEventListener('toggle', () => render());
+
+// ---- live view stream (reconnects if the app restarts; paused while the gallery is open)
+const view = $('view');
+let tab = 'cam';
+view.onerror = () => setTimeout(() => { if (tab === 'cam') view.src = '/stream?' + Date.now(); }, 1000);
+view.src = '/stream';
+
+// ---- gallery: list (media mode), thumbnails, preview (low-resolution proxy), downloads to the PC
+let M = null;              // /api/media
+let DL = [];               // /api/media/downloads items
+let galFilter = 'all';
+let galBuiltFor = null;    // M.updated + filter the grid was built for
+const selected = new Set();
+const keyOf = f => f.storage + ':' + f.path;
+const byKey = new Map();
+const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
+const fmtSize = b => b >= 1e9 ? (b / 1e9).toLocaleString(LOCALE, { maximumFractionDigits: 2 }) + ' GB'
+  : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+const fmtDur = s => s == null ? '' : Math.floor(s / 60) + ':' + pad(s % 60);
+const fmtDay = d => new Date(d + 'T12:00:00').toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+function setTab(t) {
+  tab = t;
+  $('tabCam').setAttribute('aria-selected', String(t === 'cam'));
+  $('tabGal').setAttribute('aria-selected', String(t === 'gal'));
+  document.querySelector('main').hidden = t !== 'cam';
+  $('gallery').hidden = t !== 'gal';
+  // The camera stays in media mode (no live view, runs cooler) while the gallery is open.
+  fetch('/api/media/mode/' + (t === 'gal' ? 'on' : 'off'), { method: 'POST' }).catch(() => {});
+  if (t === 'gal') {
+    view.removeAttribute('src');
+    loadMedia().then(() => { if (!M || (!M.updated && M.state !== 'listing')) refreshMedia(); });
+    pollDownloads();
+  } else view.src = '/stream?' + Date.now();
+}
+setInterval(() => { if (tab === 'gal') fetch('/api/media/mode/on', { method: 'POST' }).catch(() => {}); }, 10000);
+window.addEventListener('pagehide', () => { if (tab === 'gal') navigator.sendBeacon('/api/media/mode/off'); });
+function thumbRetry(img) {   // thumbnails fail while the camera reconnects: try again a few times
+  const n = +(img.dataset.n || 0);
+  if (n >= 6) return;
+  img.dataset.n = n + 1;
+  setTimeout(() => { img.src = img.src.replace(/&r=\d+$/, '') + '&r=' + Date.now(); }, 2500 * (n + 1));
+}
+$('tabCam').onclick = () => setTab('cam');
+$('tabGal').onclick = () => setTab('gal');
+
+async function loadMedia() {
+  try { M = await (await fetch('/api/media', { cache: 'no-store' })).json(); } catch (e) { return; }
+  for (const f of M.files) byKey.set(keyOf(f), f);
+  renderGallery();
+  if (M.state === 'listing') setTimeout(loadMedia, 700);
+}
+async function refreshMedia() {
+  if (M && M.state === 'listing') return;
+  try {
+    const r = await (await fetch('/api/media/refresh', { method: 'POST' })).json();
+    if (!r.ok) { toast('Gallery: ' + r.error, true); return; }
+  } catch (e) { return; }
+  if (M) M.state = 'listing';
+  renderGallery();
+  setTimeout(loadMedia, 500);
+}
+
+function visibleFiles() {
+  return M ? M.files.filter(f => galFilter === 'all' || f.type === galFilter) : [];
+}
+function isOnPC(f) {
+  return f.downloaded || DL.some(d => d.path === f.path && d.state === 'done');
+}
+function renderGallery() {
+  const files = visibleFiles();
+  const listing = M && M.state === 'listing';
+  const total = M ? M.files.reduce((a, f) => a + f.size, 0) : 0;
+  const videos = M ? M.files.filter(f => f.type === 'video').length : 0;
+  $('galInfo').textContent = !M ? '—' : listing && !M.files.length ? 'Reading the gallery…'
+    : `${plural(M.files.length, 'file')} · ${plural(videos, 'video')} · ${plural(M.files.length - videos, 'photo')} · ${fmtSize(total)}` + (listing ? ' · reading…' : '');
+  $('galRefresh').disabled = listing || !(S && S.link === 'on' && S.connected);
+  $('galEmpty').hidden = files.length > 0;
+  $('galEmpty').textContent = !M || (listing && !M.files.length) ? "Reading the camera's gallery…"
+    : M.state === 'error' ? 'Could not read the gallery: ' + M.error
+    : M.updated ? 'No files of this type.' : 'Press “Refresh” to read the gallery.';
+  for (const b of $('galFilter').children) b.setAttribute('aria-pressed', String(b.dataset.f === galFilter));
+  const stamp = (M && M.updated) + '|' + galFilter + '|' + files.length;
+  if (stamp !== galBuiltFor) {
+    galBuiltFor = stamp;
+    const days = new Map();
+    for (const f of files) {
+      const d = (f.stamp || '').slice(0, 10) || 'no date';
+      if (!days.has(d)) days.set(d, []);
+      days.get(d).push(f);
+    }
+    let html = '';
+    for (const [d, list] of days) {
+      const size = list.reduce((a, f) => a + f.size, 0);
+      html += `<h4 class="gal-day">${d === 'no date' ? d : esc(fmtDay(d))}<small>${list.length} · ${fmtSize(size)}</small></h4><div class="gal-grid">`;
+      for (const f of list) {
+        const thumb = f.thumb ? `<img loading="lazy" alt="" onerror="thumbRetry(this)" src="/api/media/thumb?s=${f.storage}&p=${encodeURIComponent(f.thumb)}">` : '';
+        html += `<div class="tile" data-k="${esc(keyOf(f))}"><div class="thumb" data-act="view" title="${esc(f.name)}">${thumb}`
+          + (f.type === 'video' ? `<span class="dur num">${fmtDur(f.duration)}</span>` : '')
+          + `<span class="badge" hidden>✓ On PC</span><span class="pick" data-act="pick" title="Select"></span>`
+          + `<div class="prog" hidden><i></i></div></div>`
+          + `<div class="meta"><b class="num">${esc((f.stamp || '').slice(11, 16))}</b><span class="num">${fmtSize(f.size)}</span>`
+          + `<span class="spacer"></span><button class="icon-btn" data-act="dl" title="Download to PC">${ICON_DL}</button></div></div>`;
+      }
+      html += '</div>';
+    }
+    $('galBody').innerHTML = html;
+  }
+  updateTiles();
+}
+function updateTiles() {
+  const active = new Map(DL.filter(d => d.state === 'queued' || d.state === 'downloading').map(d => [d.path, d]));
+  for (const tile of $('galBody').querySelectorAll('.tile')) {
+    const f = byKey.get(tile.dataset.k);
+    if (!f) continue;
+    const d = active.get(f.path), onPc = isOnPC(f);
+    tile.classList.toggle('sel', selected.has(tile.dataset.k));
+    tile.querySelector('.badge').hidden = !onPc || !!d;
+    const prog = tile.querySelector('.prog');
+    prog.hidden = !d;
+    if (d) prog.firstElementChild.style.width = (d.size ? 100 * d.done / d.size : 0).toFixed(1) + '%';
+    const btn = tile.querySelector('[data-act=dl]');
+    btn.disabled = !!d;
+    btn.title = d ? 'Queued' : onPc ? 'Already on the PC (download again)' : 'Download to PC';
+  }
+  const n = selected.size;
+  $('galDownload').disabled = n === 0;
+  $('galDownloadText').textContent = n ? `Download (${n})` : 'Download';
+  const fresh = visibleFiles().filter(f => !isOnPC(f));
+  $('galSelect').textContent = n && fresh.every(f => selected.has(keyOf(f))) ? 'Clear selection' : 'Select new';
+}
+$('galBody').addEventListener('click', e => {
+  const act = e.target.closest('[data-act]'), tile = e.target.closest('.tile');
+  if (!act || !tile) return;
+  const f = byKey.get(tile.dataset.k);
+  if (!f) return;
+  if (act.dataset.act === 'pick' || (act.dataset.act === 'view' && (e.ctrlKey || e.shiftKey))) {
+    e.stopPropagation();
+    selected.has(tile.dataset.k) ? selected.delete(tile.dataset.k) : selected.add(tile.dataset.k);
+    updateTiles();
+  } else if (act.dataset.act === 'view') openViewer(f);
+  else if (act.dataset.act === 'dl') download([f]);
+});
+for (const b of $('galFilter').children) b.onclick = () => { galFilter = b.dataset.f; renderGallery(); };
+$('galRefresh').onclick = refreshMedia;
+$('galSelect').onclick = () => {
+  const fresh = visibleFiles().filter(f => !isOnPC(f));
+  if (selected.size && fresh.every(f => selected.has(keyOf(f)))) selected.clear();
+  else fresh.forEach(f => selected.add(keyOf(f)));
+  updateTiles();
+};
+$('galDownload').onclick = () => {
+  download([...selected].map(k => byKey.get(k)).filter(Boolean));
+  selected.clear(); updateTiles();
+};
+$('galFolder').onclick = () => fetch('/api/media/open-folder', { method: 'POST' });
+$('galDlClear').onclick = async () => { await fetch('/api/media/clear', { method: 'POST' }); pollDownloads(); };
+
+async function download(files) {
+  if (!files.length) return;
+  const items = files.map(f => ({ storage: f.storage, path: f.path, name: f.name, size: f.size }));
+  try {
+    const r = await (await fetch('/api/media/download', { method: 'POST', body: JSON.stringify({ items }) })).json();
+    if (r.ok) activity(files.length === 1 ? `Downloading ${files[0].name}` : `Downloading ${files.length} files`, 'info');
+    else toast(r.error, true);
+  } catch (e) { toast('The app is not responding', true); }
+  pollDownloads();
+}
+
+let dlTimer = null;
+async function pollDownloads() {
+  clearTimeout(dlTimer);
+  try {
+    const r = await (await fetch('/api/media/downloads', { cache: 'no-store' })).json();
+    const before = new Map(DL.map(d => [d.id, d.state]));
+    DL = r.items;
+    for (const d of DL) {
+      const was = before.get(d.id);
+      if (was && was !== d.state && d.state === 'done') activity(`Downloaded: ${d.name}`, 'ok');
+      if (was && was !== d.state && d.state === 'error') activity(`Could not download ${d.name}: ${d.error}`, 'err');
+    }
+    renderDownloads(r.folder);
+    updateTiles();
+  } catch (e) { /* app restarting */ }
+  const busyDl = DL.some(d => d.state === 'queued' || d.state === 'downloading');
+  if (tab === 'gal' || busyDl) dlTimer = setTimeout(pollDownloads, busyDl ? 700 : 2000);
+}
+function renderDownloads(folder) {
+  $('galDl').hidden = DL.length === 0;
+  if (!DL.length) return;
+  const active = DL.filter(d => d.state === 'queued' || d.state === 'downloading');
+  const speed = DL.filter(d => d.state === 'downloading').reduce((a, d) => a + d.speed, 0);
+  $('galDlInfo').textContent = (active.length ? `${active.length} pending` + (speed ? ` · ${(speed / 1e6).toFixed(1)} MB/s` : '') + ' · ' : '') + `in ${folder}`;
+  const label = { queued: 'queued', downloading: '', done: 'on PC', cancelled: 'cancelled', error: 'error' };
+  $('galDlRows').innerHTML = DL.slice().reverse().map(d => {
+    const pct = d.size ? 100 * d.done / d.size : 0;
+    const status = d.state === 'downloading' ? `${pct.toFixed(0)} % · ${fmtSize(d.done)} of ${fmtSize(d.size)}` : label[d.state];
+    const cls = d.state === 'error' ? 'err' : d.state === 'done' ? 'ok' : '';
+    const cancel = d.state === 'queued' || d.state === 'downloading'
+      ? `<button class="icon-btn" title="Cancel" onclick="fetch('/api/media/cancel/${d.id}',{method:'POST'}).then(pollDownloads)">✕</button>` : '<span></span>';
+    return `<dt title="${esc(d.name)}">${esc(d.name)}</dt><dd class="num ${cls}" title="${esc(d.error || '')}">${esc(status)}</dd>${cancel}`
+      + (d.state === 'downloading' ? `<div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>` : '');
+  }).join('');
+}
+
+// preview: videos play their low-resolution proxy (.LRF, H.264 720p); photos show the JPEG itself
+let lbFile = null;
+function openViewer(f) {
+  lbFile = f;
+  const base = f.path.replace(/\.[^.]+$/, '');
+  const media = $('lbMedia');
+  if (f.type === 'video') {
+    media.innerHTML = `<video controls autoplay playsinline src="/api/media/view?s=${f.storage}&p=${encodeURIComponent(base + '.LRF')}"></video>`;
+    media.firstElementChild.onerror = () => { media.innerHTML = '<p class="gal-empty">This video has no low-resolution preview (.LRF). Download it to watch it.</p>'; };
+  } else {
+    media.innerHTML = `<img alt="" src="/api/media/view?s=${f.storage}&p=${encodeURIComponent(f.path)}">`;
+  }
+  $('lbName').textContent = f.name;
+  $('lbInfo').textContent = [f.stamp, fmtSize(f.size), f.type === 'video' ? fmtDur(f.duration) + ' · low-resolution preview' : null,
+    isOnPC(f) ? 'already on the PC' : null].filter(Boolean).join(' · ');
+  $('lightbox').hidden = false;
+}
+function closeViewer() { $('lightbox').hidden = true; $('lbMedia').innerHTML = ''; lbFile = null; }
+$('lbClose').onclick = closeViewer;
+$('lightbox').onclick = e => { if (e.target === $('lightbox')) closeViewer(); };
+$('lbDownload').onclick = () => { if (lbFile) download([lbFile]); closeViewer(); };
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('lightbox').hidden) closeViewer(); else if (!$('camPanel').hidden) closeCams(); });
+
+async function poll() {
+  try {
+    S = await (await fetch('/api/status', { cache: 'no-store' })).json();
+    track(S);
+  } catch (e) { S = null; }
+  render();
+  setTimeout(poll, 300);
+}
+poll();
+pollTopics();
+loadOptions();
+</script>
+</body>
+</html>

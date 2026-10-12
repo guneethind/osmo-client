@@ -1,0 +1,3 @@
+bleak>=1.0
+av>=14
+pillow>=10

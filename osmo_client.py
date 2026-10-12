@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Osmo Client for Windows: control a DJI Osmo camera from the PC over Wi-Fi (unofficial).
+
+Opens a local page (http://127.0.0.1:8091) with the live view, the camera's capture modes, a shutter
+(photo or record, depending on the mode), exposure and format settings, the full camera status, and a
+gallery to preview the camera's files and download them to the PC.
+
+How it connects: Bluetooth LE to find, pair and wake the camera (the first time it asks to approve
+"OSMO" on its screen) and to read the password of its Wi-Fi access point; then the PC's Wi-Fi joins
+that access point and everything else runs over it. Keep internet on another adapter (Ethernet) while
+connected. "Disconnect" on the page, or Ctrl+C here, puts the PC's Wi-Fi back on its own network.
+
+    python osmo_client.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import sys
+import threading
+import time
+import webbrowser
+from pathlib import Path
+
+from camlink import ble, datalink, models, wifi
+from camlink.registry import DEFAULT_TRANSPORT, other_transport
+from camlink.util import fine_timer, log
+from camlink.video import H264Decoder
+from client.app import App
+from client.server import start_server
+
+
+async def run(args: argparse.Namespace) -> None:
+    app = App()
+    app.loop = asyncio.get_running_loop()
+    if args.downloads:
+        app.downloader.base = Path(args.downloads)
+    stop = threading.Event()
+    decoder = H264Decoder(app.on_frame, stop)
+    decoder.start()
+    threading.Thread(target=app.settings_loop, args=(stop,), daemon=True, name="settings").start()
+    threading.Thread(target=app.media_hold_loop, args=(stop,), daemon=True, name="media-hold").start()
+    start_server(app, args.port)
+    if not args.no_browser:
+        webbrowser.open(f"http://127.0.0.1:{args.port}/")
+    home = args.home or wifi.current_network(args.interface)
+    if home.lower().startswith(models.NAME_PREFIXES):
+        home = ""                    # started while still on a camera's network: nothing to return to
+    app.home = home
+    # Which camera: --address, else the one used last; with none linked yet the page lists the cameras
+    # around and the user picks one.
+    last = app.registry.last_used()
+    app.target = args.address.upper() if args.address else (last or {}).get("address")
+    if args.off:
+        app.want_link.clear()
+    link: ble.BleLink | None = None
+    joined = False                   # the PC's Wi-Fi was moved to the camera (so disconnecting restores it)
+
+    def wanted() -> bool:
+        return app.want_link.is_set() and app.target is not None
+
+    async def pause(seconds: float) -> None:
+        """Sleep, but wake early if the page disconnects, picks another camera, or we quit."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end and wanted() and not app.target_changed.is_set() and not stop.is_set():
+            await asyncio.sleep(0.25)
+
+    async def release() -> None:
+        nonlocal link, joined
+        if link is not None:
+            with contextlib.suppress(Exception):
+                await link.close()
+            link = None
+        if joined:
+            await asyncio.to_thread(wifi.restore, home, args.interface)
+            joined = False
+
+    try:
+        while not stop.is_set():
+            app.target_changed.clear()
+            if not wanted():
+                # Disconnected, or no camera chosen yet: release the camera (BLE + Wi-Fi) so the phone app
+                # or the dock can use it, put the PC back on its own network, and listen for cameras
+                # around (that is also how the page shows whether the camera is asleep).
+                app.link = "off" if app.target else "select"
+                if app.stage != "error":
+                    app.set_stage(None)
+                if link is not None or joined:
+                    log("Disconnected: camera released")
+                await release()
+                await app.discover(lambda: wanted() or stop.is_set())
+                continue
+            target = app.target
+            known = app.registry.get(target)
+            app.link = "connecting"
+            try:
+                # Pair again whenever BLE dropped (camera asleep, off, restarted) or another camera was
+                # picked: pairing is also what wakes the camera's Wi-Fi.
+                if link is None or link.disconnected.is_set() or link.address != target:
+                    if link is not None:
+                        await link.close()
+                    link = ble.BleLink()
+                    link.on_topic = lambda payload: app.state.update_topic(payload)  # app.state is replaced per camera
+                    link.on_stage = app.set_stage
+                    await link.connect(target, args.approve_timeout)
+                    seen = app.nearby.get(target)
+                    if seen and (link.advert is None or link.advert.get("model_id") is None):
+                        link.advert = seen     # the advert caught while connecting had no model in it
+                    known = app.registry.remember(link)
+                if app.target != target or not wanted():
+                    continue
+                app.use_camera(target, (known or {}).get("name") or link.name)
+                app.set_stage("wifi")
+                joined = True            # set first: a failed join may already have left the home network
+                await asyncio.to_thread(wifi.join, link.ssid, link.password, args.join_timeout, args.interface)
+                transport = (known or {}).get("transport") or dict(DEFAULT_TRANSPORT)
+                if transport.get("poke", True):
+                    await asyncio.to_thread(datalink.poke)
+            except Exception as error:  # noqa: BLE001 - keep trying until the camera is back (Ctrl+C quits)
+                app.set_stage("error", str(error))
+                if link is not None:
+                    with contextlib.suppress(Exception):
+                        await link.close()
+                link = None
+                if app.registry.get(target) is None:
+                    # A new camera that did not pair (prompt not approved, out of range...): don't keep
+                    # asking it to approve; wait for the user to try again from the page.
+                    log(f"Could not link the camera ({error})")
+                    app.want_link.clear()
+                    continue
+                log(f"Camera not reachable ({error}); retrying in 5 s")
+                await pause(5)
+                continue
+            if not wanted() or app.target != target:
+                continue                 # disconnected or another camera picked while connecting
+            app.set_stage("datalink")
+            session = datalink.Datalink(port=transport.get("port", datalink.DATALINK_PORT),
+                                        on_video=decoder.feed, on_message=app.on_message)
+            decoder.reset()
+            app.datalink = session
+            app.state.connected = True
+            task = asyncio.ensure_future(asyncio.to_thread(session.run))
+            started = time.monotonic()
+            while not task.done() and not stop.is_set():
+                await asyncio.sleep(0.3)
+                if (session.last_video or app.state.last_status > started) and app.link != "on":
+                    app.link = "on"
+                    app.set_stage("on")
+                if not wanted() or app.target != target:
+                    session.stop()
+                elif app.state.in_playback():
+                    started = time.monotonic()   # the gallery pauses the live view; the link is fine
+                elif time.monotonic() - max(session.last_video, started, app.video_grace) > args.stall:
+                    log("No video, restarting the session")
+                    session.stop()
+            app.datalink = None
+            app.state.connected = False
+            session.stop()
+            try:
+                await task
+            except RuntimeError as error:
+                if "handshake" in str(error):
+                    # Not every model listens where the Osmo Nano does (some rebadges use UDP 10004 without
+                    # the TCP poke): try the other transport next time and remember it.
+                    other = other_transport(transport)
+                    log(f"{error}; next try: UDP {other['port']}" + (" with" if other["poke"] else " without")
+                        + " the TCP poke")
+                    app.registry.set_transport(target, other)
+                    app.set_stage("error", str(error))
+            except Exception:  # noqa: BLE001
+                pass
+            if app.target != target:
+                await release()          # another camera picked: drop this one before connecting
+            if not stop.is_set():
+                await pause(1)
+    finally:
+        stop.set()
+        app.datalink = None
+        if joined:
+            wifi.restore(home, args.interface)
+        if link is not None:
+            await link.close()
+        log("Stopped.")
+
+
+def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--port", type=int, default=8091, help="port of the local page (default 8091)")
+    parser.add_argument("--address", help="Bluetooth address of the camera (default: the one used last)")
+    parser.add_argument("--off", action="store_true", help="start disconnected (connect from the page)")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the page in the browser")
+    parser.add_argument("--downloads", help="folder for files copied from the camera (default: Videos\\DJI Osmo)")
+    parser.add_argument("--interface", help="Wi-Fi adapter to use, as Windows names it (default: the first one)")
+    parser.add_argument("--home", help="Wi-Fi network to return to (default: the current one)")
+    parser.add_argument("--stall", type=float, default=3.0, help="restart the session after N s without video")
+    parser.add_argument("--join-timeout", type=float, default=45)
+    parser.add_argument("--approve-timeout", type=float, default=90)
+    try:
+        with fine_timer():
+            asyncio.run(run(parser.parse_args()))
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
