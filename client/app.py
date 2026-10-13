@@ -59,7 +59,7 @@ class App:
         self.want_link = threading.Event()     # the UI's connect / disconnect switch
         self.want_link.set()
         self.link = "connecting"               # select | off | connecting | on
-        self.home = ""                         # Wi-Fi network the PC returns to when disconnected
+        self.home = ""                         # Wi-Fi network the computer returns to when disconnected
         # Cameras: linked ones are remembered; `target` is the one to connect to (None = let the user
         # pick); `nearby` holds the cameras heard over BLE; `stage` tracks the connection steps.
         self.registry = CameraRegistry()

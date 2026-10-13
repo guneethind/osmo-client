@@ -1,4 +1,4 @@
-"""Copies files from the camera's HTTP server to the PC, one at a time, resuming after drops."""
+"""Copies files from the camera's HTTP server to the computer, one at a time, resuming after drops."""
 
 from __future__ import annotations
 

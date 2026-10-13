@@ -39,7 +39,8 @@ Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 3/4) use the same protocol and 
 part; the commands were mapped on the Osmo Nano and only the Nano has been tested. The Osmo 360 is not
 supported.
 
-Need the camera as a webcam for video calls? See the companion app, **OsmoCam**.
+Need the camera as a webcam for video calls? See the companion app,
+**[OsmoCam](https://github.com/luisreysan/osmocam)**.
 
 ## Screenshots
 
@@ -68,32 +69,81 @@ Need the camera as a webcam for video calls? See the companion app, **OsmoCam**.
   - **Windows** 10 or 11.
   - **macOS** 12 or newer.
   - **Linux** with **NetworkManager** (Ubuntu, Fedora, Mint, Debian desktop and most others) and BlueZ.
-- [Python](https://www.python.org/downloads/) 3.10 to 3.14 (3.14 recommended). Python 3.15 is too new
-  for now: some of the libraries used here have no build for it yet. With several versions installed,
-  the newest from 3.10 to 3.14 is used.
-  - macOS: the `python3` that comes with macOS is too old; install Python 3.14 from python.org (or with
-    Homebrew: `brew install python@3.14`).
-  - Debian / Ubuntu: also `sudo apt install python3-venv`.
+- **[Python](https://www.python.org/downloads/) 3.10 to 3.14** (3.14 recommended). Python 3.15 is too
+  new for now: some of the libraries used here have no build for it yet. If you already installed 3.15,
+  install 3.14 as well: with several versions installed, the app picks the newest from 3.10 to 3.14 by
+  itself.
 - **Internet through another adapter** (Ethernet, USB tethering or a second Wi-Fi adapter) if you need
-  it while connected: the Wi-Fi adapter joins the camera's network.
+  it while connected: the Wi-Fi adapter joins the camera's network. The first run also needs internet,
+  to install the requirements.
 
-## Run it
+## Install and run
 
-1. Download or clone this repository.
-2. Turn the camera on and close the DJI Mimo app on your phone (the camera accepts one client at a time).
-3. Start the app. The first run creates a private Python environment and installs the requirements
-   (needs internet once). The page opens in your browser.
-   - **Windows**: double-click **`osmo-client.bat`**.
-   - **macOS / Linux**: open a terminal in this folder and run **`./osmo-client.sh`** (or
-     `sh osmo-client.sh`). On macOS, allow **Bluetooth** for Terminal when asked.
+Before you start: turn the camera on and close the DJI Mimo app on your phone (the camera accepts one
+app at a time).
+
+### Windows
+
+1. Install **Python 3.14** from <https://www.python.org/downloads/windows/>.
+2. Download the [latest release](https://github.com/luisreysan/osmo-client/releases/latest)
+   (**Source code (zip)**) and extract it.
+3. Double-click **`osmo-client.bat`**. The first run takes a minute: it creates a private Python
+   environment and installs the requirements. Then the page opens in your browser.
 4. Pick your camera under **Nearby** and click **Link**. The camera shows **"OSMO"**: approve it on the
-   camera screen within ~20 seconds. Next time it connects to the camera used last by itself.
+   camera screen within ~20 seconds.
 
-Stop with **Ctrl+C** in the console window: the computer's Wi-Fi goes back to the network it was on.
+Stop with **Ctrl+C** in the console window: the PC's Wi-Fi goes back to the network it was on.
+
+### macOS
+
+1. Install **Python 3.14**: on <https://www.python.org/downloads/macos/>, download the **macOS 64-bit
+   universal2 installer** of the latest Python 3.14 and run it. (The `python3` that comes with macOS is
+   too old. With Homebrew: `brew install python@3.14`.)
+2. Download the [latest release](https://github.com/luisreysan/osmo-client/releases/latest)
+   (**Source code (zip)**). Safari unzips it in your Downloads folder.
+3. Open **Terminal** (press Cmd+Space, type `Terminal`, press Return). Type `cd ` (with a space at the
+   end), drag the unzipped folder onto the Terminal window, and press Return. Then run:
+   ```
+   sh osmo-client.sh
+   ```
+   The first run takes a minute: it creates a private Python environment and installs the
+   requirements. Then the page opens in your browser.
+4. macOS asks whether **Terminal** may use **Bluetooth**: click **Allow**.
+5. Pick your camera under **Nearby** and click **Link**. The camera shows **"OSMO"**: approve it on the
+   camera screen within ~20 seconds.
+
+While connected, the Mac's Wi-Fi is on the camera's network, so there is no internet over Wi-Fi. When
+you are done, click **Disconnect** on the page or press **Ctrl+C** in Terminal: the app makes the Mac
+forget the camera's network and switches Wi-Fi off and on, and the Mac rejoins its usual network by
+itself within a few seconds.
+
+Next time, open Terminal, `cd` to the folder again (or press the Up arrow to find the earlier commands)
+and run `sh osmo-client.sh`: nothing is installed again. Downloads go to `Movies/DJI Osmo/<camera>`.
+
+### Linux
+
+1. Install Python 3.10 to 3.14 if your system doesn't have it. On Debian and Ubuntu, also run
+   `sudo apt install python3-venv`.
+2. Download the [latest release](https://github.com/luisreysan/osmo-client/releases/latest)
+   (**Source code (tar.gz)** or **(zip)**) and extract it.
+3. In a terminal in that folder, run `sh osmo-client.sh` (or `./osmo-client.sh`). The first run takes a
+   minute: it creates a private Python environment and installs the requirements. Then the page opens
+   in your browser.
+4. Pick your camera under **Nearby** and click **Link**, and approve **"OSMO"** on the camera screen.
+
+The camera's network is saved in NetworkManager as a connection named after the camera, set to never
+connect by itself or take over your internet route. Stop with **Ctrl+C**: the Wi-Fi goes back to the
+connection it was on.
+
+### Next time and updates
+
+The app connects to the camera used last by itself. To update, download the new release and start it
+the same way: your linked cameras are kept, and the private Python environment is reused (it is
+updated only when the requirements change).
 
 ### Options
 
-The same on every system (`osmo-client.bat` on Windows, `./osmo-client.sh` on macOS and Linux):
+The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on macOS and Linux):
 
 ```
 --off                     start disconnected (connect from the page)
@@ -115,10 +165,6 @@ The same on every system (`osmo-client.bat` on Windows, `./osmo-client.sh` on ma
 - ISO and shutter can only be set in **Manual** exposure.
 - There is no known command to put the Nano to sleep: after **Disconnect** it goes to sleep by itself
   after a while. **Connect** wakes it up.
-- **macOS**: when you disconnect, the app makes the Mac forget the camera's network and switches Wi-Fi
-  off and on; the Mac then rejoins its usual network by itself, in a few seconds.
-- **Linux**: the camera's network is saved in NetworkManager as a connection named after the camera,
-  set to never connect by itself or take over your internet route.
 
 ## How it works
 
@@ -152,8 +198,10 @@ Code layout:
   click **Disconnect** when you are done.
 - **"Not available" for the microSD**: the dock's microSD is only listed when the camera is docked with
   a card inside.
-- **macOS, "Bluetooth is not available" or nothing found**: allow Bluetooth for Terminal (or the app you
-  started it from) in System Settings > Privacy & Security > Bluetooth, then start it again.
+- **"Installing the requirements failed (Python 3.15)"**: install Python 3.14 as well (see
+  [Requirements](#requirements)) and start the app again; it picks 3.14 by itself.
+- **macOS, "Bluetooth is not available" or no camera found**: allow Bluetooth for Terminal (or the app
+  you started it from) in System Settings > Privacy & Security > Bluetooth, then start it again.
 - **macOS 15 or newer, "No route to host"**: allow Terminal under System Settings > Privacy & Security >
   Local Network.
 - **Linux, "NetworkManager (nmcli) was not found"**: join the camera's Wi-Fi yourself; its name and

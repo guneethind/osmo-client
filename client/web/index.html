@@ -1045,7 +1045,7 @@ let tab = 'cam';
 view.onerror = () => setTimeout(() => { if (tab === 'cam') view.src = '/stream?' + Date.now(); }, 1000);
 view.src = '/stream';
 
-// ---- gallery: list (media mode), thumbnails, preview (low-resolution proxy), downloads to the PC
+// ---- gallery: list (media mode), thumbnails, preview (low-resolution proxy), downloads to the computer
 let M = null;              // /api/media
 let DL = [];               // /api/media/downloads items
 let galFilter = 'all';

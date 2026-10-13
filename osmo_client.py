@@ -58,7 +58,7 @@ async def run(args: argparse.Namespace) -> None:
     link: ble.BleLink | None = None
     session: datalink.Datalink | None = None
     task: asyncio.Future | None = None
-    joined = False                   # the PC's Wi-Fi was moved to the camera (so disconnecting restores it)
+    joined = False                   # the Wi-Fi was moved to the camera (so disconnecting restores it)
 
     def wanted() -> bool:
         return app.want_link.is_set() and app.target is not None
@@ -84,7 +84,7 @@ async def run(args: argparse.Namespace) -> None:
             app.target_changed.clear()
             if not wanted():
                 # Disconnected, or no camera chosen yet: release the camera (BLE + Wi-Fi) so the phone app
-                # or the dock can use it, put the PC back on its own network, and listen for cameras
+                # or the dock can use it, put the computer back on its own network, and listen for cameras
                 # around (that is also how the page shows whether the camera is asleep).
                 app.link = "off" if app.target else "select"
                 if app.stage != "error":
