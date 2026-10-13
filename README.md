@@ -198,8 +198,10 @@ Code layout:
   click **Disconnect** when you are done.
 - **"Not available" for the microSD**: the dock's microSD is only listed when the camera is docked with
   a card inside.
-- **"Installing the requirements failed (Python 3.15)"**: install Python 3.14 as well (see
-  [Requirements](#requirements)) and start the app again; it picks 3.14 by itself.
+- **"Python 3.10 to 3.14 is needed"** (or, with version 1.1.0 and older, **"Failed building wheel for
+  winrt-…"** and **"Microsoft Visual C++ 14.0 or greater is required"**): only Python 3.15 is installed,
+  and some libraries have no build for it yet. Install Python 3.14 as well (see
+  [Requirements](#requirements)) and start the app again: it picks 3.14 by itself.
 - **macOS, "Bluetooth is not available" or no camera found**: allow Bluetooth for Terminal (or the app
   you started it from) in System Settings > Privacy & Security > Bluetooth, then start it again.
 - **macOS 15 or newer, "No route to host"**: allow Terminal under System Settings > Privacy & Security >
