@@ -42,5 +42,5 @@ this repository.
 | package | license |
 |---|---|
 | [bleak](https://github.com/hbldh/bleak) | MIT |
-| [PyAV](https://github.com/PyAV-Org/PyAV) | BSD-3-Clause; its Windows wheels include FFmpeg libraries under their own (L)GPL licenses |
+| [PyAV](https://github.com/PyAV-Org/PyAV) | BSD-3-Clause; its wheels include FFmpeg libraries under their own (L)GPL licenses |
 | [Pillow](https://github.com/python-pillow/Pillow) | MIT-CMU |

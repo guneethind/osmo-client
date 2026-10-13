@@ -223,6 +223,9 @@
          font-weight: 550; border: 1px solid var(--border-2); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn:hover:not(:disabled) { border-color: var(--muted); }
   .btn:disabled { opacity: .45; cursor: default; }
+  .btn.busy:disabled { opacity: .8; }
+  .btn .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
+               animation: spin .9s linear infinite; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
   .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
   .btn svg { width: 15px; height: 15px; }
@@ -298,7 +301,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="7" width="17" height="10" rx="2.2"/><path d="M21.5 10.5v3"/><rect id="battFill" x="4.5" y="9" width="13" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
     <b class="num" id="battChipText"></b>
   </span>
-  <button class="power" id="power" data-on="true" title="Release the camera and put the PC's Wi-Fi back on your network">
+  <button class="power" id="power" data-on="true" title="Release the camera and put the computer's Wi-Fi back on your network">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg>
     <span id="powerText">Disconnect</span>
   </button>
@@ -428,7 +431,7 @@
     <button class="btn" id="galSelect">Select new</button>
     <button class="btn primary" id="galDownload" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span id="galDownloadText">Download</span></button>
-    <button class="btn" id="galFolder" title="Open the downloads folder in File Explorer">
+    <button class="btn" id="galFolder" title="Open the downloads folder">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2h10V19H3z"/></svg>Open folder</button>
   </div>
   <div class="card gal-dl" id="galDl" hidden>
@@ -445,7 +448,7 @@
     <div class="lb-media" id="lbMedia"></div>
     <div class="lb-bar">
       <div class="info"><b id="lbName"></b><span id="lbInfo"></span></div>
-      <button class="btn primary" id="lbDownload">Download to PC</button>
+      <button class="btn primary" id="lbDownload">Download</button>
       <button class="btn" id="lbClose">Close</button>
     </div>
   </div>
@@ -697,6 +700,12 @@ $('veilBtn').onclick = () => (S && S.link === 'select') ? openCams() : setLink(t
 
 // ---- cameras: pick / link / forget (one active at a time)
 let CAMS = null, camAutoOpened = false, camTimer = null;
+// After a Connect/Link click: {address, until} until the app reports it is connecting to that camera
+// (switching cameras first releases the old one, which can take a few seconds).
+let camPending = null;
+// Connecting from this panel closes it once the camera is live: null, 'clicked', then 'connecting' (the
+// old camera's link can still read 'on' right after the click, so 'on' only counts after 'connecting').
+let closeOnConnect = null;
 const STAGES = {
   searching: 'Looking for the camera over Bluetooth…',
   connecting: 'Connecting over Bluetooth…',
@@ -707,7 +716,7 @@ const STAGES = {
 };
 const POWER = { awake: 'on', asleep: 'asleep', unknown: 'nearby' };
 function openCams() { $('camPanel').hidden = false; pollCams(); }
-function closeCams() { $('camPanel').hidden = true; clearTimeout(camTimer); }
+function closeCams() { $('camPanel').hidden = true; clearTimeout(camTimer); closeOnConnect = null; }
 $('camBtn').onclick = openCams;
 $('camClose').onclick = closeCams;
 $('camPanel').addEventListener('click', e => { if (e.target === $('camPanel')) closeCams(); });
@@ -715,9 +724,20 @@ $('camScan').onclick = () => fetch('/api/cameras/scan', { method: 'POST' }).then
 async function pollCams() {
   clearTimeout(camTimer);
   try { CAMS = await (await fetch('/api/cameras', { cache: 'no-store' })).json(); } catch (e) { CAMS = null; }
+  if (CAMS) {
+    const connecting = CAMS.link === 'connecting';
+    if (camPending && (Date.now() > camPending.until || (connecting && CAMS.target === camPending.address))) camPending = null;
+    if (closeOnConnect === 'clicked' && connecting) closeOnConnect = 'connecting';
+    else if (closeOnConnect === 'connecting' && CAMS.link === 'on') { closeCams(); return; }   // live: show the camera
+    else if (closeOnConnect === 'connecting' && !connecting) closeOnConnect = null;            // gave up or cancelled
+  }
   renderCams();
   if (!$('camPanel').hidden) camTimer = setTimeout(pollCams, 1000);
 }
+// Connecting to this camera right now (or just clicked, before the app reports it).
+const connectingTo = a => (CAMS && CAMS.target === a && CAMS.link === 'connecting') || (camPending && camPending.address === a);
+const busyButtons = label => `<button class="btn primary busy" disabled><span class="spin"></span>${label}</button>
+        <button class="btn" data-cancel title="Stop trying to connect">Cancel</button>`;
 // Only touch the DOM when something visible changed: rebuilding the buttons every second would
 // swallow clicks that land mid-rebuild.
 function setHTML(el, html) { if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; } }
@@ -736,35 +756,49 @@ function renderCams() {
   const st = CAMS.stage, stEl = $('camStage');
   stEl.hidden = !st || st === 'on';
   stEl.className = 'cam-stage' + (st === 'error' ? ' err' : '');
-  stEl.textContent = st === 'error' ? 'Could not connect: ' + (CAMS.stage_error || 'error') : (STAGES[st] || '');
+  stEl.textContent = st === 'error' ? 'Could not connect: ' + (CAMS.stage_error || 'error') + (CAMS.link === 'connecting' ? ' · retrying…' : '')
+    : (STAGES[st] || '');
   const untested = c => c.tested ? '' : '<span class="tag-mini warn">untested</span>';
   setHTML($('camKnown'), CAMS.known.length ? CAMS.known.map(c => `
     <div class="cam-row${c.active ? ' active' : ''}">
       <div class="who"><b>${esc(c.name || c.address)}${untested(c)}</b><span>${esc(camLine(c))}</span></div>
-      <div class="acts">${c.connected ? '<span class="tag-mini ok">active</span>' : `<button class="btn primary" data-connect="${c.address}">Connect</button>`}
-        <button class="btn" data-forget="${c.address}" title="Forget this camera on this PC">Forget</button></div>
+      <div class="acts">${connectingTo(c.address) ? busyButtons('Connecting…') : c.connected ? '<span class="tag-mini ok">active</span>'
+        : `<button class="btn primary" data-connect="${c.address}">Connect</button>`}
+        ${connectingTo(c.address) ? '' : `<button class="btn" data-forget="${c.address}" title="Forget this camera on this computer">Forget</button>`}</div>
     </div>`).join('') : '<div class="empty">You have not linked a camera yet.</div>');
   setHTML($('camNearby'), CAMS.nearby.length ? CAMS.nearby.map(c => `
     <div class="cam-row">
       <div class="who"><b>${esc(c.name || c.address)}${untested(c)}<span class="tag-mini">new</span></b>
         <span>${esc([c.model, POWER[c.power] || null, signal(c.rssi)].filter(Boolean).join(' · '))}</span></div>
-      <div class="acts">${c.unsupported ? `<span class="tag-mini">${esc(c.unsupported)}</span>` : `<button class="btn primary" data-connect="${c.address}">Link</button>`}</div>
+      <div class="acts">${c.unsupported ? `<span class="tag-mini">${esc(c.unsupported)}</span>` : connectingTo(c.address) ? busyButtons('Linking…')
+        : `<button class="btn primary" data-connect="${c.address}">Link</button>`}</div>
     </div>`).join('')
     : `<div class="empty">${CAMS.scanning ? 'Looking for DJI Osmo cameras nearby… (turn yours on and bring it closer)' : CAMS.link === 'on' ? 'Press “Search again” to see other cameras nearby.' : 'No new cameras nearby.'}</div>`);
   $('camScanning').textContent = CAMS.scanning ? '· searching…' : '';
   $('camScan').disabled = CAMS.scanning || CAMS.link !== 'on';
 }
 $('camPanel').addEventListener('click', async e => {
-  const c = e.target.closest('[data-connect]'), f = e.target.closest('[data-forget]');
+  const c = e.target.closest('[data-connect]'), f = e.target.closest('[data-forget]'), x = e.target.closest('[data-cancel]');
   if (c) {
-    const known = CAMS && CAMS.known.some(k => k.address === c.dataset.connect);
-    const r = await (await fetch('/api/cameras/connect', { method: 'POST', body: JSON.stringify({ address: c.dataset.connect }) })).json();
-    if (!r.ok) toast(r.error, true);
-    else activity(known ? 'Connecting to the camera…' : 'Linking a new camera: approve “OSMO” on its screen', 'info');
+    const address = c.dataset.connect;
+    const known = CAMS && CAMS.known.some(k => k.address === address);
+    camPending = { address, until: Date.now() + 20000 };
+    renderCams();                                    // lock the button right away
+    const r = await (await fetch('/api/cameras/connect', { method: 'POST', body: JSON.stringify({ address }) })).json();
+    if (!r.ok) { camPending = null; toast(r.error, true); }
+    else {
+      closeOnConnect = 'clicked';
+      activity(known ? 'Connecting to the camera…' : 'Linking a new camera: approve “OSMO” on its screen', 'info');
+    }
+    pollCams();
+  } else if (x) {
+    camPending = null; closeOnConnect = null;
+    await fetch('/api/link/off', { method: 'POST' });
+    activity('Stopped connecting', 'info');
     pollCams();
   } else if (f) {
     const cam = CAMS && CAMS.known.find(k => k.address === f.dataset.forget);
-    if (!confirm(`Forget ${cam ? cam.name : 'this camera'} on this PC? To use it again you will have to link it again.`)) return;
+    if (!confirm(`Forget ${cam ? cam.name : 'this camera'} on this computer? To use it again you will have to link it again.`)) return;
     await fetch('/api/cameras/forget', { method: 'POST', body: JSON.stringify({ address: f.dataset.forget }) });
     pollCams();
   }
@@ -799,19 +833,19 @@ function render() {
 
   // veil over the viewer
   let veil = null;
-  if (!s) veil = ['The app is not responding', 'Start Osmo Client (osmo-client.bat) and reload this page.', false];
+  if (!s) veil = ['The app is not responding', 'Start Osmo Client again and reload this page.', false];
   else if (off) {
-    const wifi = s.home ? ` The PC's Wi-Fi is back on “${s.home}”.` : '';
+    const wifi = s.home ? ` This computer's Wi-Fi is back on “${s.home}”.` : '';
     if (!cam) veil = ['Disconnected', 'Looking for the camera over Bluetooth… If it does not show up, it is fully off or too far away.' + wifi, true];
     else if (cam.power === 'asleep') veil = ['Camera asleep', 'Connecting wakes it up.' + wifi, false];
     else veil = ['Disconnected', 'The camera is on and free (you can use the phone app or the dock). If nobody uses it, it goes to sleep by itself.' + wifi, false];
   }
-  else if (select) veil = ['Choose a camera', 'Find and link a DJI Osmo camera nearby (turn it on and bring it close to the PC).', false];
-  else if (s.stage === 'approve') veil = ['Approve “OSMO” on the camera', 'The camera asks for permission to link with this PC: confirm it on its screen.', true];
+  else if (select) veil = ['Choose a camera', 'Find and link a DJI Osmo camera nearby (turn it on and bring it close to the computer).', false];
+  else if (s.stage === 'approve') veil = ['Approve “OSMO” on the camera', 'The camera asks for permission to link with this computer: confirm it on its screen.', true];
   else if (s.stage === 'error' && !s.connected) veil = ['Could not connect', s.stage_error || 'Retrying…', true];
   else if (!s.connected) veil = ['Connecting to ' + (act ? act.name : 'the camera') + '…', STAGES[s.stage] || 'Pairing over Bluetooth and joining its Wi-Fi network.', true];
   else if (s.media_state === 'listing') veil = ['Reading the gallery…', 'The live view comes back in a few seconds.', true];
-  else if (s.downloads_active && s.playback) veil = [`Downloading ${plural(s.downloads_active, 'file')} to the PC…`,
+  else if (s.downloads_active && s.playback) veil = [`Downloading ${plural(s.downloads_active, 'file')} to the computer…`,
     'The live view comes back when it finishes: without it the camera sends files about 6 times faster and stays cooler.', true];
   else if (s.media_mode) veil = ['Leaving the gallery…', 'The live view comes back in a few seconds.', true];
   else if (s.playback) veil = ['The camera is in playback', 'Go back to the viewfinder on the camera to get the live view back.', false];
@@ -825,7 +859,7 @@ function render() {
   pw.dataset.on = String(!off);
   pw.disabled = linkBusy;
   $('powerText').textContent = off ? 'Connect' : 'Disconnect';
-  pw.title = off ? 'Connect to the camera again' : "Release the camera and put the PC's Wi-Fi back on your network";
+  pw.title = off ? 'Connect to the camera again' : "Release the camera and put the computer's Wi-Fi back on your network";
 
   // HUD
   const rec = s && s.fresh && s.record;
@@ -1103,10 +1137,10 @@ function renderGallery() {
         const thumb = f.thumb ? `<img loading="lazy" alt="" onerror="thumbRetry(this)" src="/api/media/thumb?s=${f.storage}&p=${encodeURIComponent(f.thumb)}">` : '';
         html += `<div class="tile" data-k="${esc(keyOf(f))}"><div class="thumb" data-act="view" title="${esc(f.name)}">${thumb}`
           + (f.type === 'video' ? `<span class="dur num">${fmtDur(f.duration)}</span>` : '')
-          + `<span class="badge" hidden>✓ On PC</span><span class="pick" data-act="pick" title="Select"></span>`
+          + `<span class="badge" hidden>✓ Downloaded</span><span class="pick" data-act="pick" title="Select"></span>`
           + `<div class="prog" hidden><i></i></div></div>`
           + `<div class="meta"><b class="num">${esc((f.stamp || '').slice(11, 16))}</b><span class="num">${fmtSize(f.size)}</span>`
-          + `<span class="spacer"></span><button class="icon-btn" data-act="dl" title="Download to PC">${ICON_DL}</button></div></div>`;
+          + `<span class="spacer"></span><button class="icon-btn" data-act="dl" title="Download to this computer">${ICON_DL}</button></div></div>`;
       }
       html += '</div>';
     }
@@ -1127,7 +1161,7 @@ function updateTiles() {
     if (d) prog.firstElementChild.style.width = (d.size ? 100 * d.done / d.size : 0).toFixed(1) + '%';
     const btn = tile.querySelector('[data-act=dl]');
     btn.disabled = !!d;
-    btn.title = d ? 'Queued' : onPc ? 'Already on the PC (download again)' : 'Download to PC';
+    btn.title = d ? 'Queued' : onPc ? 'Already on this computer (download again)' : 'Download to this computer';
   }
   const n = selected.size;
   $('galDownload').disabled = n === 0;
@@ -1159,7 +1193,10 @@ $('galDownload').onclick = () => {
   download([...selected].map(k => byKey.get(k)).filter(Boolean));
   selected.clear(); updateTiles();
 };
-$('galFolder').onclick = () => fetch('/api/media/open-folder', { method: 'POST' });
+$('galFolder').onclick = async () => {
+  const r = await (await fetch('/api/media/open-folder', { method: 'POST' })).json();
+  if (!r.ok) { activity(r.error, 'err'); toast(r.error, true); }
+};
 $('galDlClear').onclick = async () => { await fetch('/api/media/clear', { method: 'POST' }); pollDownloads(); };
 
 async function download(files) {
@@ -1197,7 +1234,7 @@ function renderDownloads(folder) {
   const active = DL.filter(d => d.state === 'queued' || d.state === 'downloading');
   const speed = DL.filter(d => d.state === 'downloading').reduce((a, d) => a + d.speed, 0);
   $('galDlInfo').textContent = (active.length ? `${active.length} pending` + (speed ? ` · ${(speed / 1e6).toFixed(1)} MB/s` : '') + ' · ' : '') + `in ${folder}`;
-  const label = { queued: 'queued', downloading: '', done: 'on PC', cancelled: 'cancelled', error: 'error' };
+  const label = { queued: 'queued', downloading: '', done: 'downloaded', cancelled: 'cancelled', error: 'error' };
   $('galDlRows').innerHTML = DL.slice().reverse().map(d => {
     const pct = d.size ? 100 * d.done / d.size : 0;
     const status = d.state === 'downloading' ? `${pct.toFixed(0)} % · ${fmtSize(d.done)} of ${fmtSize(d.size)}` : label[d.state];
@@ -1223,7 +1260,7 @@ function openViewer(f) {
   }
   $('lbName').textContent = f.name;
   $('lbInfo').textContent = [f.stamp, fmtSize(f.size), f.type === 'video' ? fmtDur(f.duration) + ' · low-resolution preview' : null,
-    isOnPC(f) ? 'already on the PC' : null].filter(Boolean).join(' · ');
+    isOnPC(f) ? 'already on this computer' : null].filter(Boolean).join(' · ');
   $('lightbox').hidden = false;
 }
 function closeViewer() { $('lightbox').hidden = true; $('lbMedia').innerHTML = ''; lbFile = null; }

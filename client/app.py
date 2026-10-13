@@ -405,7 +405,7 @@ class App:
         try:
             await ble.scan(10 ** 6, on_found=self.on_seen, stop=until)
         except Exception as error:  # noqa: BLE001 - Bluetooth off or busy: the list just stays empty
-            log(f"Bluetooth scan unavailable: {error}")
+            log(f"Bluetooth scan unavailable: {error} ({ble.UNAVAILABLE_HINT})")
             while not until():
                 await asyncio.sleep(0.5)
         finally:
@@ -465,7 +465,7 @@ class App:
             known.append(info)
         known_ids = {c["address"] for c in known}
         nearby = [dict(n, **seen_info(a)) for a, n in sorted(self.nearby.items(), key=lambda i: -i[1]["rssi"])
-                  if a not in known_ids and now - n["t"] <= 20]
+                  if a not in known_ids and (now - n["t"] <= 20 or a == self.target)]
         return {"target": self.target, "known": known, "nearby": nearby, "scanning": self.scanning,
                 "stage": self.stage, "stage_error": self.stage_error, "link": self.link,
                 "tested_models": [MODELS[m] for m in sorted(TESTED_MODELS)]}

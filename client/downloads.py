@@ -6,6 +6,8 @@ import contextlib
 import ctypes
 import os
 import queue
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -17,13 +19,31 @@ from camlink.util import log
 
 
 def default_download_dir() -> Path:
-    """The user's Videos folder (even when it has been moved), subfolder 'DJI Osmo'."""
+    """The user's videos folder, subfolder 'DJI Osmo': Videos on Windows (even when it has been moved),
+    Movies on macOS, the desktop's videos folder (XDG) on Linux."""
     folder = None
-    with contextlib.suppress(Exception):
-        buffer = ctypes.create_unicode_buffer(260)
-        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x000E, None, 0, buffer) == 0:  # CSIDL_MYVIDEO
-            folder = Path(buffer.value)
+    if sys.platform == "win32":
+        with contextlib.suppress(Exception):
+            buffer = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x000E, None, 0, buffer) == 0:  # CSIDL_MYVIDEO
+                folder = Path(buffer.value)
+    elif sys.platform == "darwin":
+        folder = Path.home() / "Movies"
+    else:
+        with contextlib.suppress(Exception):
+            said = subprocess.run(["xdg-user-dir", "VIDEOS"], capture_output=True, text=True, timeout=5).stdout.strip()
+            if said and Path(said) != Path.home():       # unset: xdg-user-dir answers the home folder
+                folder = Path(said)
     return (folder or Path.home() / "Videos") / "DJI Osmo"
+
+
+def open_folder(folder: Path) -> None:
+    """Show `folder` in the system's file manager (File Explorer, Finder, or the Linux desktop's)."""
+    if sys.platform == "win32":
+        os.startfile(folder)  # noqa: S606 - local desktop app
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)],  # noqa: S603
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class Downloader:

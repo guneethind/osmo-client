@@ -1,11 +1,15 @@
-# Osmo Client for Windows
+# Osmo Client
 
-Control a **DJI Osmo Nano** from your Windows PC over Wi-Fi: live view, capture modes, photo and video,
-exposure and format settings, camera status, and a gallery to preview and download your files.
+Control a **DJI Osmo Nano** from your computer over Wi-Fi: live view, capture modes, photo and video,
+exposure and format settings, camera status, and a gallery to preview and download your files. Runs on
+**Windows, macOS and Linux**.
 
 > Unofficial and independent: not affiliated with, endorsed or sponsored by DJI. See [Legal](#legal).
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
+
+> **New in 1.1: macOS and Linux.** macOS is tested end to end with the Osmo Nano (linking, live view,
+> settings, gallery and downloads); Linux is still being tested on real hardware. Reports are welcome.
 
 ![Osmo Client: live view, shutter, capture modes and camera settings](screenshots/main-app.png)
 
@@ -23,12 +27,13 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   quality and bitrate, battery (%, voltage, temperature, charging), ISO/shutter in use when the camera
   publishes them.
 - **Gallery**: browse the camera's files by day, filter videos/photos, preview (low-resolution video
-  proxy or the photo), and **download to the PC over Wi-Fi** (queue, progress, resumes if interrupted)
-  into `Videos\DJI Osmo\<camera>`. Nothing is ever deleted from the camera.
+  proxy or the photo), and **download to the computer over Wi-Fi** (queue, progress, resumes if
+  interrupted) into `DJI Osmo/<camera>` in your Videos folder (Movies on macOS). Nothing is ever
+  deleted from the camera.
 - **Several cameras**: link more than one; one is active at a time. Shows whether the camera is
   asleep or on while disconnected.
-- **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your PC
-  back on its own Wi-Fi without closing the app.
+- **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
+  computer back on its own Wi-Fi without closing the app.
 
 Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 3/4) use the same protocol and may work, fully or in
 part; the commands were mapped on the Osmo Nano and only the Nano has been tested. The Osmo 360 is not
@@ -38,7 +43,7 @@ Need the camera as a webcam for video calls? See the companion app, **OsmoCam**.
 
 ## Screenshots
 
-**Gallery**: the camera's files by day, ready to download to the PC.
+**Gallery**: the camera's files by day, ready to download to the computer.
 
 ![Gallery](screenshots/gallery.png)
 
@@ -59,31 +64,46 @@ Need the camera as a webcam for video calls? See the companion app, **OsmoCam**.
 
 ## Requirements
 
-- Windows 10 or 11 with **Bluetooth LE** and a **Wi-Fi adapter**.
+- A computer with **Bluetooth LE** and **Wi-Fi**:
+  - **Windows** 10 or 11.
+  - **macOS** 12 or newer.
+  - **Linux** with **NetworkManager** (Ubuntu, Fedora, Mint, Debian desktop and most others) and BlueZ.
+- [Python](https://www.python.org/downloads/) 3.10 to 3.14 (3.14 recommended). Python 3.15 is too new
+  for now: some of the libraries used here have no build for it yet. With several versions installed,
+  the newest from 3.10 to 3.14 is used.
+  - macOS: the `python3` that comes with macOS is too old; install Python 3.14 from python.org (or with
+    Homebrew: `brew install python@3.14`).
+  - Debian / Ubuntu: also `sudo apt install python3-venv`.
 - **Internet through another adapter** (Ethernet, USB tethering or a second Wi-Fi adapter) if you need
   it while connected: the Wi-Fi adapter joins the camera's network.
-- [Python](https://www.python.org/downloads/windows/) 3.10 or newer.
 
 ## Run it
 
 1. Download or clone this repository.
 2. Turn the camera on and close the DJI Mimo app on your phone (the camera accepts one client at a time).
-3. Double-click **`osmo-client.bat`**. The first run creates a private Python environment and installs
-   the requirements (needs internet once). The page opens in your browser.
+3. Start the app. The first run creates a private Python environment and installs the requirements
+   (needs internet once). The page opens in your browser.
+   - **Windows**: double-click **`osmo-client.bat`**.
+   - **macOS / Linux**: open a terminal in this folder and run **`./osmo-client.sh`** (or
+     `sh osmo-client.sh`). On macOS, allow **Bluetooth** for Terminal when asked.
 4. Pick your camera under **Nearby** and click **Link**. The camera shows **"OSMO"**: approve it on the
    camera screen within ~20 seconds. Next time it connects to the camera used last by itself.
 
-Stop with **Ctrl+C** in the console window: the PC's Wi-Fi goes back to the network it was on.
+Stop with **Ctrl+C** in the console window: the computer's Wi-Fi goes back to the network it was on.
 
 ### Options
 
+The same on every system (`osmo-client.bat` on Windows, `./osmo-client.sh` on macOS and Linux):
+
 ```
-osmo-client.bat --off                      start disconnected (connect from the page)
-osmo-client.bat --downloads D:\Footage     download folder (default: Videos\DJI Osmo)
-osmo-client.bat --interface "Wi-Fi 2"      use this Wi-Fi adapter (default: the first one)
-osmo-client.bat --port 8091                port of the local page
-osmo-client.bat --no-browser               don't open the page automatically
-osmo-client.bat --help                     everything else
+--off                     start disconnected (connect from the page)
+--downloads FOLDER        download folder (default: DJI Osmo in Videos, Movies on macOS)
+--interface NAME          Wi-Fi adapter to use: "Wi-Fi 2" on Windows, en0 on macOS, wlan0 on Linux
+                          (default: the first one)
+--home NETWORK            Wi-Fi network to go back to on Windows and Linux (default: the one the computer is on)
+--port 8091               port of the local page
+--no-browser              don't open the page automatically
+--help                    everything else
 ```
 
 ## Good to know
@@ -95,12 +115,16 @@ osmo-client.bat --help                     everything else
 - ISO and shutter can only be set in **Manual** exposure.
 - There is no known command to put the Nano to sleep: after **Disconnect** it goes to sleep by itself
   after a while. **Connect** wakes it up.
+- **macOS**: when you disconnect, the app makes the Mac forget the camera's network and switches Wi-Fi
+  off and on; the Mac then rejoins its usual network by itself, in a few seconds.
+- **Linux**: the camera's network is saved in NetworkManager as a connection named after the camera,
+  set to never connect by itself or take over your internet route.
 
 ## How it works
 
 1. **Bluetooth LE**: finds the camera, pairs (the "OSMO" prompt), wakes it and asks for the name and
    password of its Wi-Fi access point.
-2. **Wi-Fi**: the PC joins that access point (the camera is `192.168.2.1`).
+2. **Wi-Fi**: the computer joins that access point (the camera is `192.168.2.1`).
 3. **Datalink**: a small UDP protocol carries commands, status and the H.264 live view. Files download
    over HTTP from the camera.
 
@@ -116,7 +140,7 @@ Code layout:
 | `client/downloads.py` | download queue |
 | `client/server.py` | local web server and JSON API (127.0.0.1 only) |
 | `client/web/index.html` | the page |
-| `camlink/` | reusable protocol package: BLE, Wi-Fi, datalink, commands, media |
+| `camlink/` | reusable protocol package: BLE, Wi-Fi (one backend per system), datalink, commands, media |
 
 ## Troubleshooting
 
@@ -128,20 +152,34 @@ Code layout:
   click **Disconnect** when you are done.
 - **"Not available" for the microSD**: the dock's microSD is only listed when the camera is docked with
   a card inside.
+- **macOS, "Bluetooth is not available" or nothing found**: allow Bluetooth for Terminal (or the app you
+  started it from) in System Settings > Privacy & Security > Bluetooth, then start it again.
+- **macOS 15 or newer, "No route to host"**: allow Terminal under System Settings > Privacy & Security >
+  Local Network.
+- **Linux, "NetworkManager (nmcli) was not found"**: join the camera's Wi-Fi yourself; its name and
+  password are in `cameras.json` (see [Privacy](#privacy)). The app carries on once you are connected.
+- **Linux, "Insufficient privileges"** when joining the camera: your user may not change network
+  settings; ask your administrator, or join the camera's network yourself.
 
 ## Privacy
 
-Everything stays on your PC. The app talks only to the camera and serves its page on `127.0.0.1` (not
-reachable from the network). The cameras you link (Bluetooth address, name, and the camera's Wi-Fi
-password) are stored in `%LOCALAPPDATA%\osmo-pc\cameras.json`, shared with OsmoCam. Downloads go to the
-folder you choose. No telemetry.
+Everything stays on your computer. The app talks only to the camera and serves its page on
+`127.0.0.1` (not reachable from the network). The cameras you link (Bluetooth address, name, and the
+camera's Wi-Fi password) are stored in `cameras.json`, shared with OsmoCam:
+
+- Windows: `%LOCALAPPDATA%\osmo-pc\cameras.json`
+- macOS: `~/Library/Application Support/osmo-pc/cameras.json`
+- Linux: `~/.local/share/osmo-pc/cameras.json`
+
+The same folder holds the app's private Python environment. Downloads go to the folder you choose. No
+telemetry.
 
 ## Legal
 
-Osmo Client for Windows is an independent project, not affiliated with, endorsed or sponsored by DJI.
+Osmo Client is an independent project, not affiliated with, endorsed or sponsored by DJI.
 DJI, Osmo, Osmo Nano and DJI Mimo are trademarks of SZ DJI Technology Co., Ltd., used here only to name
 the cameras this software works with. The repository contains no DJI code, firmware or assets. Its
-purpose is interoperability: letting owners use their own camera with a Windows PC.
+purpose is interoperability: letting owners use their own camera with their computer.
 
 It is provided "as is", without warranty of any kind (see [LICENSE](LICENSE)). It may stop working after
 a camera firmware update. Use it at your own risk.

@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import io
 import json
-import os
 import threading
 import urllib.error
 import urllib.request
@@ -18,6 +17,7 @@ from camlink import camera as cam, media
 from camlink.util import log
 
 from .app import App
+from .downloads import open_folder
 
 PAGE_FILE = Path(__file__).resolve().parent / "web" / "index.html"
 CONTENT_TYPES = {"LRF": "video/mp4", "MP4": "video/mp4", "THM": "image/jpeg", "JPG": "image/jpeg"}
@@ -237,7 +237,11 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             elif path == "/api/media/open-folder":
                 folder = app.downloader.folder
                 folder.mkdir(parents=True, exist_ok=True)
-                os.startfile(folder)  # noqa: S606 - local desktop app: opens File Explorer
+                try:
+                    open_folder(folder)
+                except OSError as error:      # no file manager to hand it to (xdg-open missing...)
+                    self._json({"ok": False, "error": f"could not open {folder}: {error}"})
+                    return
                 self._json({"ok": True})
             else:
                 self.send_error(404)

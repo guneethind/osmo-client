@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Osmo Client for Windows: control a DJI Osmo camera from the PC over Wi-Fi (unofficial).
+"""Osmo Client: control a DJI Osmo camera from the computer over Wi-Fi (unofficial).
 
 Opens a local page (http://127.0.0.1:8091) with the live view, the camera's capture modes, a shutter
 (photo or record, depending on the mode), exposure and format settings, the full camera status, and a
-gallery to preview the camera's files and download them to the PC.
+gallery to preview the camera's files and download them to the computer.
 
 How it connects: Bluetooth LE to find, pair and wake the camera (the first time it asks to approve
-"OSMO" on its screen) and to read the password of its Wi-Fi access point; then the PC's Wi-Fi joins
+"OSMO" on its screen) and to read the password of its Wi-Fi access point; then the computer's Wi-Fi joins
 that access point and everything else runs over it. Keep internet on another adapter (Ethernet) while
-connected. "Disconnect" on the page, or Ctrl+C here, puts the PC's Wi-Fi back on its own network.
+connected. "Disconnect" on the page, or Ctrl+C here, puts the computer's Wi-Fi back on its own network.
 
     python osmo_client.py
 """
@@ -200,11 +200,14 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8091, help="port of the local page (default 8091)")
-    parser.add_argument("--address", help="Bluetooth address of the camera (default: the one used last)")
+    parser.add_argument("--address", help="Bluetooth address of the camera, as the page lists it (default: the "
+                                          "one used last)")
     parser.add_argument("--off", action="store_true", help="start disconnected (connect from the page)")
     parser.add_argument("--no-browser", action="store_true", help="don't open the page in the browser")
-    parser.add_argument("--downloads", help="folder for files copied from the camera (default: Videos\\DJI Osmo)")
-    parser.add_argument("--interface", help="Wi-Fi adapter to use, as Windows names it (default: the first one)")
+    parser.add_argument("--downloads", help="folder for files copied from the camera (default: DJI Osmo in "
+                                            "your Videos folder, Movies on macOS)")
+    parser.add_argument("--interface", help="Wi-Fi adapter to use: 'Wi-Fi 2' on Windows, en0 on macOS, wlan0 "
+                                            "on Linux (default: the first one)")
     parser.add_argument("--home", help="Wi-Fi network to return to (default: the current one)")
     parser.add_argument("--stall", type=float, default=3.0, help="restart the session after N s without video")
     parser.add_argument("--join-timeout", type=float, default=45)
