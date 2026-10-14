@@ -202,6 +202,10 @@ Code layout:
   winrt-…"** and **"Microsoft Visual C++ 14.0 or greater is required"**): only Python 3.15 is installed,
   and some libraries have no build for it yet. Install Python 3.14 as well (see
   [Requirements](#requirements)) and start the app again: it picks 3.14 by itself.
+- **Windows, "Connection request failed with error 0x80342002"** (version 1.1.1 and older): Wi-Fi is
+  turned off on the computer (the Wi-Fi button in the quick settings, or airplane mode). Newer versions
+  turn it on by themselves; otherwise turn it on and try again. Bluetooth alone is not enough: the
+  video and the files come over Wi-Fi.
 - **macOS, "Bluetooth is not available" or no camera found**: allow Bluetooth for Terminal (or the app
   you started it from) in System Settings > Privacy & Security > Bluetooth, then start it again.
 - **macOS 15 or newer, "No route to host"**: allow Terminal under System Settings > Privacy & Security >
