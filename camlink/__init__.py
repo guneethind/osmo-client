@@ -14,4 +14,4 @@ Unofficial and independent; not affiliated with DJI. The protocol is described i
     media      the camera's media library: listing and HTTP downloads
 """
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"

@@ -139,7 +139,8 @@ async def run(args: argparse.Namespace) -> None:
                 continue                 # disconnected or another camera picked while connecting
             app.set_stage("datalink")
             session = datalink.Datalink(port=transport.get("port", datalink.DATALINK_PORT),
-                                        on_video=decoder.feed, on_message=app.on_message)
+                                        on_video=decoder.feed, on_message=app.on_message,
+                                        liveview=models.liveview_mode((known or {}).get("model_id")))
             decoder.reset()
             app.datalink = session
             app.state.connected = True
@@ -154,8 +155,9 @@ async def run(args: argparse.Namespace) -> None:
                     session.stop()
                 elif app.state.in_playback():
                     started = time.monotonic()   # the gallery pauses the live view; the link is fine
-                elif time.monotonic() - max(session.last_video, started, app.video_grace) > args.stall:
-                    log("No video, restarting the session")
+                elif (time.monotonic() - max(session.last_video, started, app.video_grace) > args.stall
+                      and not session.stopped.is_set()):
+                    log(f"No video, restarting the session ({session.summary()})")
                     session.stop()
             app.datalink = None
             app.state.connected = False
