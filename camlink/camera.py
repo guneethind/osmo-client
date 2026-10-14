@@ -16,6 +16,10 @@ All of this was verified on an Osmo Nano; the full description is in docs/PROTOC
 
 Replies start with a result code: 00 = OK, E0 = command not supported, E3 = invalid parameter (or not
 allowed in the current state, e.g. ISO while exposure is on Auto), DF = not available right now.
+
+What each capture mode offers (resolutions, frame rates, ISO, shutter speeds...) the camera publishes itself
+as capability topics (see parse_capability). The fixed tables below are the Osmo Nano's, used until those
+arrive.
 """
 
 from __future__ import annotations
@@ -42,6 +46,9 @@ RATE_TABLES = {0x01: VIDEO_RATES, 0x28: VIDEO_RATES, 0x00: SLOWMO_RATES}
 # Exposure. ISO codes 03-0C are one stop apart (01/02 behave like 03, 0D like 0C).
 EXPOSURE_MODES = {"auto": 0x01, "manual": 0x04}     # 02/03 (priority modes) are refused by the Nano
 ISO_VALUES = {3: 100, 4: 200, 5: 400, 6: 800, 7: 1600, 8: 3200, 9: 6400, 10: 12800, 11: 25600, 12: 51200}
+# The ISO codes each capture mode offers: up to 12800 in Video, 25600 in the others, Auto only in Super Night.
+MODE_ISO = {0x01: list(range(3, 11)), 0x28: []}
+DEFAULT_ISO = list(range(3, 12))
 # Shutter speed = u16 (bit 15 set: 1/x s, otherwise whole seconds) + a decimal digit in bits 16-23
 # (0x5800C = 1/12.5 s, 0x30001 = 1.3 s). The speeds the camera accepts, fastest first.
 SHUTTER_SPEEDS = [0x9F40, 0x9900, 0x9388, 0x8FA0, 0x8C80, 0x89C4, 0x87D0, 0x8640, 0x84E2, 0x83E8, 0x8320,
@@ -67,7 +74,7 @@ MODE_FORMATS = {
     0x02: {"res": [0x10, 0x2D, 0x0A], "fps": [2, 3]},                                  # Timelapse
     0x0A: {"res": [0x10, 0x2D, 0x0A], "fps": [2, 3]},                                  # Hyperlapse
 }
-LIMITED_FPS = {0x0C: [1, 2, 3]}         # 1080p 4:3 tops out at 30 fps
+LIMITED_FPS = {0x67: [1, 2, 3, 4, 5]}   # 4K 4:3 tops out at 50 fps
 # Slow-mo: (resolution, fps code, speed factor); the factor goes in the last byte of 02/18.
 SLOWMO_FORMATS = [(0x10, 7, 4), (0x2D, 7, 4), (0x0A, 7, 4), (0x0A, 8, 8)]
 # Photo format: 02/12 [size, ratio].
@@ -177,6 +184,77 @@ def exposure_from_topic(data: bytes) -> dict | None:
         return None
     return {"iso": int.from_bytes(data[16:20], "little") or None,
             "shutter": shutter_text(int.from_bytes(data[20:22], "little"))}
+
+
+# Capability topics: what the current capture mode offers. The camera sends each one once when subscribed
+# and again when it changes (after a capture mode switch, for example). Layout: [0] supported (0 = no),
+# [1-2] u16 LE length, then the table, mostly a count followed by that many entries.
+CAPABILITY_TOPICS = ("camcap_base", "camcap_video_format", "camcap_iso", "camcap_shutter",
+                     "camcap_photo_size", "camcap_wb")
+SUBSCRIBED_TOPICS = ("cam_expo_param",) + CAPABILITY_TOPICS
+
+
+def _entries(table: bytes, width: int, at: int = 0) -> list[bytes] | None:
+    """The `count` entries of `width` bytes that follow the count byte at `at`."""
+    if at >= len(table):
+        return None
+    end = at + 1 + table[at] * width
+    if end > len(table):
+        return None
+    return [table[i:i + width] for i in range(at + 1, end, width)]
+
+
+def _shutter_table(table: bytes) -> list[int] | None:
+    """[x][n][n bytes][group count], then per group: [key][slowest: u16 + decimal][count][count speeds of
+    u16 + decimal] (the raw speed format of 02/28). Speeds of every group, in order."""
+    if len(table) < 2 or 2 + table[1] >= len(table):
+        return None
+    at = 2 + table[1]
+    speeds: list[int] = []
+    group = at + 1
+    for _ in range(table[at]):
+        entries = _entries(table, 3, group + 4)
+        if entries is None:
+            return None
+        speeds += [raw for raw in (int.from_bytes(e[:2], "little") | e[2] << 16 for e in entries) if raw not in speeds]
+        group += 5 + 3 * len(entries)
+    return speeds
+
+
+def parse_capability(name: str, data: bytes):
+    """Decode a capability topic; None when it's not one we use, the camera marks it unsupported, or it
+    doesn't parse.
+        camcap_base          capture modes (02/E1 codes), then other fields
+        camcap_video_format  (resolution, fps code) pairs for 02/18
+        camcap_iso           ISO codes for 02/2A (Auto left out)
+        camcap_shutter       raw shutter speeds for 02/28
+        camcap_photo_size    (size, ratio) pairs for 02/12
+        camcap_wb            colour temperature range (K) for 02/2C"""
+    if len(data) < 4 or not data[0]:
+        return None
+    size = int.from_bytes(data[1:3], "little")
+    table = data[3:3 + size]
+    if len(table) < size:
+        return None
+    if name == "camcap_base":
+        entries = _entries(table, 1)
+        return [e[0] for e in entries] if entries is not None else None
+    if name == "camcap_video_format":
+        entries = _entries(table, 3)
+        return [(e[0], e[1]) for e in entries] if entries is not None else None
+    if name == "camcap_iso":                     # a flag byte, then the codes (0 = Auto)
+        entries = _entries(table, 1, 1)
+        return [e[0] for e in entries if e[0]] if entries is not None else None
+    if name == "camcap_shutter":
+        return _shutter_table(table)
+    if name == "camcap_photo_size":
+        entries = _entries(table, 4)
+        return [(e[0], e[1]) for e in entries] if entries is not None else None
+    if name == "camcap_wb":                      # [min / 100] 00 [max / 100] 00 ...
+        if len(table) < 4 or not 10 <= table[0] < table[2]:
+            return None
+        return (table[0] * 100, table[2] * 100)
+    return None
 
 
 def parse_settings(mode: bytes, iso: bytes, shutter: bytes, video: bytes, photo: bytes = b"",

@@ -17,6 +17,8 @@ class CameraState:
         self.raw_status = b""
         self.battery: dict | None = None
         self.topics: dict[str, dict] = {}   # name -> {data, count, t}
+        self.caps: dict[str, object] = {}   # capability topic -> decoded table (for the current capture mode)
+        self.caps_version = 0               # bumped whenever a table changes
         self.settings: dict | None = None   # exposure / format read back from the camera
         self.last_status = 0.0
         self.last_battery = 0.0
@@ -46,10 +48,18 @@ class CameraState:
         if parsed is None:
             return
         name, data = parsed
+        table = cam.parse_capability(name, data) if name in cam.CAPABILITY_TOPICS else None
         with self._lock:
             topic = self.topics.setdefault(name, {"count": 0})
             topic.update(data=data, t=time.monotonic())
             topic["count"] += 1
+            if table is not None and self.caps.get(name) != table:
+                self.caps[name] = table
+                self.caps_version += 1
+
+    def capabilities(self) -> tuple[int, dict]:
+        with self._lock:
+            return self.caps_version, dict(self.caps)
 
     def update_settings(self, settings: dict) -> None:
         with self._lock:
@@ -108,6 +118,7 @@ class CameraState:
                 "settings": self.settings if self.connected and now - self.last_settings < 10 else None,
                 "raw_status": self.raw_status.hex() if fresh else "",
                 "topics": len(self.topics),
+                "caps_version": self.caps_version,
             }
             if status:
                 mode = status["capture_mode"]

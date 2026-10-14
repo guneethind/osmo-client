@@ -18,14 +18,17 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 - **Live view** of the camera.
 - **Capture modes**: Photo, Video, Super Night, Slow-mo, Timelapse, Hyperlapse (keys `1`–`6`).
 - **Shutter**: takes a photo, starts/stops recording or a timelapse, depending on the mode (`Space`).
-- **Exposure**: Auto / Manual, ISO 100–51200, shutter speed 1/8000 s–30 s, white balance (Auto or
-  2000–10000 K). Each capture mode keeps its own exposure, as on the camera.
+- **Exposure**: Auto / Manual, ISO (Nano: up to 12800 in Video, 25600 in the other modes), shutter speed
+  (1/8000 s–30 s), white balance (Auto or 2000–10000 K). Each capture mode keeps its own exposure, as on
+  the camera.
 - **Format**: video resolution (4K, 2.7K, 1080p in 16:9 or 4:3) and frame rate (24–60 fps), slow motion
-  (120 fps 4×, 240 fps 8×), photo size and ratio (L 36/31 MP, M 9/8 MP). Only what the current mode
-  supports is offered.
+  (120 fps 4×, 240 fps 8×), photo size and ratio (L 36/31 MP, M 9/8 MP).
+- **Only what the camera offers**: the camera publishes what each capture mode supports (modes,
+  resolutions and frame rates, ISO, shutter speeds, photo sizes), and the app offers exactly that. Until
+  that arrives it uses the Osmo Nano's lists.
 - **Status**: recording state and time, storage free and remaining (video time / photos), estimated
-  quality and bitrate, battery (%, voltage, temperature, charging), ISO/shutter in use when the camera
-  publishes them.
+  quality and bitrate, battery (%, voltage, temperature, charging), ISO and shutter in use (also in
+  Auto).
 - **Gallery**: browse the camera's files by day, filter videos/photos, preview (low-resolution video
   proxy or the photo), and **download to the computer over Wi-Fi** (queue, progress, resumes if
   interrupted) into `DJI Osmo/<camera>` in your Videos folder (Movies on macOS). Nothing is ever

@@ -572,7 +572,7 @@ async function command(path, label) {
   }
 }
 async function setMode(m) {
-  if (!ready() || busy || S.capture_mode === m.p || isRecording()) return;
+  if (!ready() || busy || S.capture_mode === m.p || isRecording() || !modeAvailable(m.p)) return;
   pendingMode = m.p; render();
   await command('/api/mode/' + m.p, `Mode → ${m.name}`);
   pendingMode = null; render();
@@ -610,23 +610,30 @@ async function setLink(on) {
   } finally { linkBusy = false; render(); }
 }
 // ---- exposure (per capture mode; ISO and shutter only in Manual)
+// What the current capture mode offers. The camera publishes it (and again whenever it changes); the page
+// asks again whenever the status shows a new table or another capture mode.
 let OPTS = null;  // /api/exposure/options
+let optsFor = null, optsLoading = false, optsAgain = false;
+const optsKey = s => `${s.caps_version}:${s.capture_mode == null ? '' : s.capture_mode}`;
 async function loadOptions() {
+  if (optsLoading) { optsAgain = true; return; }
+  optsLoading = true; optsAgain = false;
+  let ok = true;
   try {
     OPTS = await (await fetch('/api/exposure/options', { cache: 'no-store' })).json();
-  } catch (e) { setTimeout(loadOptions, 1000); return; }
-  // The hidden first option shows values that aren't in the list (Auto, or one set on the camera).
-  $('eIso').innerHTML = '<option value="" hidden>—</option>' +
-    OPTS.iso.map(o => `<option value="${o.code}">${nf.format(o.value)}</option>`).join('');
-  $('eShutter').innerHTML = '<option value="" hidden>—</option>' +
-    OPTS.shutter.map(o => `<option value="${o.raw}">${esc(o.label)} s</option>`).join('');
-  fillSelect($('eWb'), [['auto', 'Auto'], ...OPTS.wb_kelvin.map(k => [k, nf.format(k) + ' K'])], 'wb');
-  fillSelect($('vSlow'), OPTS.slowmo.map(o => [o.res + ':' + o.fps, o.label]), 'slow');
-  fillSelect($('pFmt'), OPTS.photo_formats.map(o => [o.size + ':' + o.ratio, o.label]), 'photo');
-  render();
+  } catch (e) { ok = false; }
+  optsLoading = false;
+  if (!ok) setTimeout(loadOptions, 1000);
+  else if (optsAgain) loadOptions();
+  else render();
 }
+const isoLabel = o => o.value ? nf.format(o.value) : 'code ' + o.code;
+const secs = label => label.endsWith('"') ? label : label + ' s';   // 1/50 s, but 30" as it is
+const modeAvailable = p => !(OPTS && OPTS.capture_modes) || OPTS.capture_modes.includes(p);
+const fpsFor = res => { const f = OPTS && OPTS.formats.find(([r]) => r === res); return f ? f[1] : []; };
 // (Re)build a select's options only when the set changes (they depend on the capture mode/resolution),
-// and never while the user has it open.
+// and never while the user has it open. The hidden first option shows values that aren't in the list
+// (Auto, or one set on the camera).
 function fillSelect(sel, items, key) {
   if (sel.dataset.key === key || document.activeElement === sel) return;
   sel.dataset.key = key;
@@ -642,10 +649,12 @@ function postJSON(path, body, label) {
 }
 $('vRes').onchange = e => {
   e.target.blur();
-  const res = +e.target.value, set = S && S.settings, mf = OPTS.mode_formats[S.capture_mode];
-  if (!mf || !set) return;
-  const fpsList = OPTS.limited_fps[res] || mf.fps;
-  const fps = fpsList.includes(set.fps_code) ? set.fps_code : Math.max(...fpsList.filter(c => c <= (set.fps_code || 2)), fpsList[0]);
+  const res = +e.target.value, set = S && S.settings, fpsList = fpsFor(res);
+  if (!fpsList.length || !set) return;
+  // Keep the frame rate when the new resolution has it, otherwise the fastest one below it.
+  const rate = c => { const o = OPTS.fps.find(o => o.code === c); return o ? o.value : c; };
+  const below = fpsList.filter(c => rate(c) <= rate(set.fps_code || 2));
+  const fps = fpsList.includes(set.fps_code) ? set.fps_code : below.length ? below[below.length - 1] : fpsList[0];
   postJSON('/api/video-format', { res, fps }, `Resolution → ${OPTS.resolutions[res]} · ${fpsLabel(fps)}`);
 };
 $('vFps').onchange = e => {
@@ -680,12 +689,12 @@ $('eManual').onclick = () => setExposure('manual');
 $('eIso').onchange = e => {
   const o = OPTS && OPTS.iso.find(o => String(o.code) === e.target.value);
   e.target.blur();
-  if (o) command('/api/iso/' + o.code, `ISO → ${nf.format(o.value)}`);
+  if (o) command('/api/iso/' + o.code, `ISO → ${isoLabel(o)}`);
 };
 $('eShutter').onchange = e => {
   const o = OPTS && OPTS.shutter.find(o => String(o.raw) === e.target.value);
   e.target.blur();
-  if (o) command('/api/shutter/' + o.raw, `Shutter → ${o.label} s`);
+  if (o) command('/api/shutter/' + o.raw, `Shutter → ${secs(o.label)}`);
 };
 function syncSelect(sel, value, label, disabled) {
   sel.disabled = disabled;
@@ -878,8 +887,10 @@ function render() {
   if (storage && storage.quality) $('qualityTag').textContent = '≈ ' + storage.quality;
 
   // capture modes
+  if (s && optsKey(s) !== optsFor) { optsFor = optsKey(s); loadOptions(); }
   for (const b of modesEl.children) {
     const p = +b.dataset.p;
+    b.hidden = !modeAvailable(p);     // modes this camera doesn't list
     b.setAttribute('aria-pressed', String(!!s && s.capture_mode === p && pendingMode == null));
     b.classList.toggle('pending', pendingMode === p);
     b.disabled = !ready() || busy || isRecording();
@@ -910,7 +921,7 @@ function render() {
   const ex = s && s.exposure, set = s && s.settings, manual = !!set && set.mode === 'manual';
   const auto = !!set && set.mode === 'auto';
   $('cIso').textContent = ex && ex.iso ? nf.format(ex.iso) : manual && set.iso ? nf.format(set.iso) : auto ? 'Auto' : '—';
-  $('cShutter').textContent = ex && ex.shutter ? ex.shutter + ' s' : manual && set.shutter ? set.shutter + ' s' : auto ? 'Auto' : '—';
+  $('cShutter').textContent = ex && ex.shutter ? secs(ex.shutter) : manual && set.shutter ? secs(set.shutter) : auto ? 'Auto' : '—';
   $('expoNote').hidden = !(s && s.connected && s.fresh && !ex && !set);
 
   // exposure card + HUD tag
@@ -918,10 +929,16 @@ function render() {
   $('eAuto').setAttribute('aria-pressed', String(auto));
   $('eManual').setAttribute('aria-pressed', String(manual));
   $('eAuto').disabled = $('eManual').disabled = !canExpo;
+  if (OPTS) {
+    fillSelect($('eIso'), OPTS.iso.map(o => [o.code, isoLabel(o)]), 'iso' + OPTS.key);
+    fillSelect($('eShutter'), OPTS.shutter.map(o => [o.raw, secs(o.label)]), 'shutter' + OPTS.key);
+    fillSelect($('eWb'), [['auto', 'Auto'], ...OPTS.wb_kelvin.map(k => [k, nf.format(k) + ' K'])], 'wb' + OPTS.key);
+  }
   syncSelect($('eIso'), manual ? set.iso_code : null,
-    manual ? (set.iso ? nf.format(set.iso) : `code ${set.iso_code}`) : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
+    manual ? (set.iso ? nf.format(set.iso) : `code ${set.iso_code}`) : auto ? 'Auto' : '—',
+    !canExpo || !manual || !OPTS || !OPTS.iso.length);
   syncSelect($('eShutter'), manual ? set.shutter_raw : null,
-    manual ? (set.shutter ? set.shutter + ' s' : '—') : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
+    manual ? (set.shutter ? secs(set.shutter) : '—') : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
   $('eNote').textContent = !set ? (s && s.connected ? "Reading the camera's exposure…" : 'Not connected to the camera.')
     : manual ? `Manual in ${(s.capture_mode_name || 'this mode')}: each capture mode keeps its own exposure.`
     : 'In Auto the camera picks ISO and shutter. Switch to Manual to set them.';
@@ -932,25 +949,31 @@ function render() {
 
   // format card: what the current capture mode offers
   const mode = s && s.capture_mode, isSlow = mode === 0x00, isPhoto = !!(s && s.photo_mode);
-  const mf = OPTS && mode != null && OPTS.mode_formats[mode];
+  const hasFormats = !!(OPTS && mode != null && OPTS.formats.length);
   const fmtLock = !ready() || busy || !set || isRecording() || !OPTS;
-  $('fmtVideo').hidden = isSlow || isPhoto || !mf;
+  $('fmtVideo').hidden = isSlow || isPhoto || !hasFormats;
   $('fmtSlow').hidden = !isSlow;
   $('fmtPhoto').hidden = !isPhoto;
-  if (mf) {
+  if (hasFormats) {
     const resNow = set && set.resolution_code;
-    fillSelect($('vRes'), mf.res.map(r => [r, OPTS.resolutions[r]]), 'res' + mode);
-    fillSelect($('vFps'), (OPTS.limited_fps[resNow] || mf.fps).map(c => [c, fpsLabel(c)]), 'fps' + mode + ':' + resNow);
+    fillSelect($('vRes'), OPTS.formats.map(([r]) => [r, OPTS.resolutions[r]]), 'res' + OPTS.key);
+    fillSelect($('vFps'), fpsFor(resNow).map(c => [c, fpsLabel(c)]), 'fps' + OPTS.key + ':' + resNow);
     syncSelect($('vRes'), resNow, (set && set.resolution) || (storage && storage.quality) || '—', fmtLock);
     syncSelect($('vFps'), set && set.fps_code, set && set.fps ? set.fps + ' fps' : '—', fmtLock);
   }
-  if (isSlow) syncSelect($('vSlow'), set && set.resolution_code != null ? set.resolution_code + ':' + set.fps_code : null,
-    (storage && storage.quality) || '—', fmtLock);
-  if (isPhoto) syncSelect($('pFmt'), set && set.photo_size_code != null ? set.photo_size_code + ':' + set.photo_ratio_code : null,
-    (set && set.photo) || (storage && storage.quality) || '—', fmtLock);
-  $('vNote').textContent = isPhoto ? 'Photo size (L 36/31 MP or M 9/8 MP) and aspect ratio.'
-    : isSlow ? 'The slow-motion factor follows the frame rate: 120 fps = 4×, 240 fps = 8× (1080p only).'
-    : mf ? 'Changing the format interrupts the live view for a few seconds.' + (mode === 0x01 ? ' 4:3 resolutions go up to 60 fps, except 1080p 4:3 (30).' : '')
+  if (isSlow && OPTS) {
+    fillSelect($('vSlow'), OPTS.slowmo.map(o => [o.res + ':' + o.fps, o.label]), 'slow' + OPTS.key);
+    syncSelect($('vSlow'), set && set.resolution_code != null ? set.resolution_code + ':' + set.fps_code : null,
+      (storage && storage.quality) || '—', fmtLock);
+  }
+  if (isPhoto && OPTS) {
+    fillSelect($('pFmt'), OPTS.photo_formats.map(o => [o.size + ':' + o.ratio, o.label]), 'photo' + OPTS.key);
+    syncSelect($('pFmt'), set && set.photo_size_code != null ? set.photo_size_code + ':' + set.photo_ratio_code : null,
+      (set && set.photo) || (storage && storage.quality) || '—', fmtLock);
+  }
+  $('vNote').textContent = isPhoto ? 'Photo size and aspect ratio.'
+    : isSlow ? 'The slow-motion factor follows the frame rate: 120 fps = 4×, 240 fps = 8×.'
+    : hasFormats ? 'Changing the format interrupts the live view for a few seconds.'
     : '—';
   const expoTag = $('expoTag');
   expoTag.hidden = !(manual && s.fresh);

@@ -24,7 +24,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from camlink import ble, datalink, models, wifi
+from camlink import ble, camera as cam, datalink, models, wifi
 from camlink.registry import DEFAULT_TRANSPORT, other_transport
 from camlink.util import fine_timer, log
 from camlink.video import H264Decoder
@@ -140,7 +140,8 @@ async def run(args: argparse.Namespace) -> None:
             app.set_stage("datalink")
             session = datalink.Datalink(port=transport.get("port", datalink.DATALINK_PORT),
                                         on_video=decoder.feed, on_message=app.on_message,
-                                        liveview=models.liveview_mode((known or {}).get("model_id")))
+                                        liveview=models.liveview_mode((known or {}).get("model_id")),
+                                        topics=cam.SUBSCRIBED_TOPICS)
             decoder.reset()
             app.datalink = session
             app.state.connected = True

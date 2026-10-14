@@ -23,20 +23,53 @@ PAGE_FILE = Path(__file__).resolve().parent / "web" / "index.html"
 CONTENT_TYPES = {"LRF": "video/mp4", "MP4": "video/mp4", "THM": "image/jpeg", "JPG": "image/jpeg"}
 
 
-def exposure_options() -> dict:
-    """Everything the page needs to fill its selectors."""
+def _builtin_formats(mode: int | None) -> list[tuple[int, int]]:
+    if mode == cam.MODE_SLOWMO:
+        return [(r, f) for r, f, _ in cam.SLOWMO_FORMATS]
+    formats = cam.MODE_FORMATS.get(mode)
+    if not formats:
+        return []
+    return [(r, f) for r in formats["res"] for f in cam.LIMITED_FPS.get(r, formats["fps"])]
+
+
+def exposure_options(app: App) -> dict:
+    """Everything the page needs to fill its selectors, for the current capture mode: the tables the camera
+    publishes when it does, otherwise the built-in ones (an Osmo Nano's). `key` changes whenever the
+    answer would, so the page knows when to ask again."""
+    version, caps = app.state.capabilities()
+    mode = app.state.capture_mode()
+    pairs = caps.get("camcap_video_format")
+    if pairs is None:
+        pairs = _builtin_formats(mode)
+    rate = lambda code: cam.FRAME_RATES.get(code, code)  # noqa: E731
+    order = {res: i for i, res in reversed(list(enumerate(r for r, _ in pairs)))}   # first appearance
+    pairs = sorted(pairs, key=lambda p: (order[p[0]], rate(p[1])))
+    formats: dict[int, list[int]] = {}
+    slowmo = []
+    if mode == cam.MODE_SLOWMO:
+        slowmo = [{"res": r, "fps": f, "label": cam.slowmo_label(r, f)} for r, f in pairs]
+    else:
+        for r, f in pairs:
+            formats.setdefault(r, []).append(f)
+    photo = caps.get("camcap_photo_size") or [(s, r) for s in cam.PHOTO_SIZE_CODES for r in cam.PHOTO_RATIOS]
+    low, high = caps.get("camcap_wb") or (cam.WB_KELVIN.start, cam.WB_KELVIN.stop - 1)
+    iso = caps.get("camcap_iso")
+    if iso is None:
+        iso = cam.MODE_ISO.get(mode, cam.DEFAULT_ISO)
     return {
+        "key": f"{version}:{'' if mode is None else mode}",
+        "source": "camera" if caps else "built-in",
+        "capture_modes": caps.get("camcap_base"),    # None: not published, show every known mode
         "modes": list(cam.EXPOSURE_MODES),
-        "iso": [{"code": c, "value": v} for c, v in cam.ISO_VALUES.items()],
+        "iso": [{"code": c, "value": cam.ISO_VALUES.get(c)} for c in iso],
+        "shutter": [{"raw": r, "label": cam.shutter_text(r)} for r in caps.get("camcap_shutter") or cam.SHUTTER_SPEEDS
+                    if cam.shutter_text(r)],
         "fps": [{"code": c, "value": v} for c, v in sorted(cam.FRAME_RATES.items(), key=lambda i: i[1])],
-        "resolutions": dict(cam.RESOLUTIONS),
-        "mode_formats": {m: {"res": f["res"], "fps": f["fps"]} for m, f in cam.MODE_FORMATS.items()},
-        "limited_fps": cam.LIMITED_FPS,
-        "slowmo": [{"res": r, "fps": f, "label": cam.slowmo_label(r, f)} for r, f, _ in cam.SLOWMO_FORMATS],
-        "photo_formats": [{"size": s, "ratio": r, "label": cam.photo_label(s, r)}
-                          for s in cam.PHOTO_SIZE_CODES for r in cam.PHOTO_RATIOS],
-        "wb_kelvin": list(cam.WB_KELVIN),
-        "shutter": [{"raw": r, "label": cam.shutter_text(r)} for r in cam.SHUTTER_SPEEDS],
+        "resolutions": {r: cam.RESOLUTIONS.get(r, f"0x{r:02x}") for r in [*cam.RESOLUTIONS, *formats]},
+        "formats": [[r, f] for r, f in formats.items()],     # resolution -> frame rates, current mode
+        "slowmo": slowmo,
+        "photo_formats": [{"size": s, "ratio": r, "label": cam.photo_label(s, r)} for s, r in photo],
+        "wb_kelvin": list(range(low, high + 1, 100)),
     }
 
 
@@ -144,14 +177,14 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._json(app.set_setting(0x1E, bytes((mode, 0))))
             elif path.startswith("/api/iso/"):
                 code = self._tail_int()
-                if code not in cam.ISO_VALUES:
-                    self._bad("unknown ISO")
+                if code not in [o["code"] for o in exposure_options(app)["iso"]]:
+                    self._bad("ISO not available in this capture mode")
                 else:
                     self._json(app.set_setting(0x2A, bytes((code,))))
             elif path.startswith("/api/shutter/"):
                 raw = self._tail_int()
-                if raw not in cam.SHUTTER_SPEEDS:
-                    self._bad("unknown shutter speed")
+                if raw not in [o["raw"] for o in exposure_options(app)["shutter"]]:
+                    self._bad("shutter speed not available in this capture mode")
                 else:
                     self._json(app.set_setting(0x28, cam.shutter_payload(raw)))
             elif path.startswith("/api/fps/"):
@@ -167,12 +200,9 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 except (ValueError, KeyError, TypeError):
                     self._bad("expected {res, fps}")
                     return
-                mode = app.state.capture_mode()
-                if mode == cam.MODE_SLOWMO:
-                    valid = (res, fps) in {(r, f) for r, f, _ in cam.SLOWMO_FORMATS}
-                else:
-                    allowed = cam.MODE_FORMATS.get(mode)
-                    valid = bool(allowed) and res in allowed["res"] and fps in cam.LIMITED_FPS.get(res, allowed["fps"])
+                options = exposure_options(app)
+                valid = ({"res": res, "fps": fps} in [{"res": o["res"], "fps": o["fps"]} for o in options["slowmo"]]
+                         or fps in dict(options["formats"]).get(res, []))
                 if not valid:
                     self._bad("format not available in this capture mode")
                 else:
@@ -184,7 +214,8 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 except (ValueError, KeyError, TypeError):
                     self._bad("expected {size, ratio}")
                     return
-                if size not in cam.PHOTO_SIZE_CODES or ratio not in cam.PHOTO_RATIOS:
+                if {"size": size, "ratio": ratio} not in [{"size": o["size"], "ratio": o["ratio"]}
+                                                          for o in exposure_options(app)["photo_formats"]]:
                     self._bad("unknown photo format")
                 else:
                     self._json(app.set_setting(0x12, bytes((size, ratio))))
@@ -196,8 +227,9 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 except (ValueError, KeyError, TypeError):
                     self._bad("expected {mode: auto|manual, kelvin}")
                     return
-                if kelvin is not None and kelvin not in cam.WB_KELVIN:
-                    self._bad("colour temperature out of range (2000-10000 K)")
+                kelvins = exposure_options(app)["wb_kelvin"]
+                if kelvin is not None and kelvin not in kelvins:
+                    self._bad(f"colour temperature out of range ({kelvins[0]}-{kelvins[-1]} K)")
                 else:
                     self._json(app.set_white_balance(manual, kelvin))
             elif path in ("/api/cameras/connect", "/api/cameras/forget"):
@@ -263,7 +295,7 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             elif path == "/api/cameras":
                 self._json(app.cameras_snapshot())
             elif path == "/api/exposure/options":
-                self._json(exposure_options())
+                self._json(exposure_options(app))
             elif path == "/api/media":
                 self._json(app.media_snapshot())
             elif path == "/api/media/downloads":
