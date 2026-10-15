@@ -55,7 +55,7 @@ class App:
         self._media_counter = 1
         self._thumbs: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.cache = MediaCache(data_dir() / "media")    # last listing and thumbnails, per camera
-        self.allow_delete = False              # --allow-delete: deleting files on the camera is offered
+        self.allow_delete = True               # deleting files on the camera is offered (--no-delete: not)
         self._media_action = 0                 # counter carried by favourite / delete requests
         self.downloader = Downloader(default_download_dir())
         # While the gallery is open the camera stays in media mode: no live view to encode, so it runs
@@ -402,10 +402,10 @@ class App:
         return result
 
     def delete_files(self, items: list[tuple[int, str]]) -> dict:
-        """Delete files on the camera, one at a time; each request is sent once (never repeated). Only
-        offered with --allow-delete."""
+        """Delete files on the camera, one at a time; each request is sent once (never repeated). The page
+        asks for confirmation first; --no-delete turns it off."""
         if not self.allow_delete:
-            return {"ok": False, "error": "deleting is off (start the app with --allow-delete)"}
+            return {"ok": False, "error": "deleting is off (the app was started with --no-delete)"}
         if self.datalink is None:
             return {"ok": False, "error": "not connected to the camera"}
         if self.media.get("cached"):         # file handles from last time may point at other files now

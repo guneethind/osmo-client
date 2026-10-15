@@ -52,8 +52,8 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   watch a 48–60 fps clip slowed down to 24/25/30 fps, and **download to the computer over Wi-Fi** (queue,
   progress, resumes if interrupted) into `DJI Osmo/<camera>` in your Videos folder (Movies on macOS). The
   list and thumbnails are kept on the computer, so the gallery opens at once, also with the camera off.
-  Nothing is deleted from the camera unless you start the app with `--allow-delete` (experimental), which
-  adds a Delete button that asks first.
+  **Delete** files on the camera (it always asks first; start the app with `--no-delete` to hide the
+  option).
 - **Several cameras**: link more than one; one is active at a time. Shows whether the camera is
   asleep or on while disconnected.
 - **Shared Wi-Fi (experimental)**: instead of the computer joining the camera's Wi-Fi, the camera can join
@@ -182,7 +182,7 @@ The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on m
 --home NETWORK            Wi-Fi network to go back to on Windows and Linux (default: the one the computer is on)
 --port 8091               port of the local page
 --no-browser              don't open the page automatically
---allow-delete            offer to delete files on the camera from the gallery (experimental)
+--no-delete               don't offer to delete files on the camera
 --help                    everything else
 ```
 

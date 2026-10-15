@@ -58,7 +58,7 @@ async def run(args: argparse.Namespace) -> None:
     # around and the user picks one.
     last = app.registry.last_used()
     app.target = args.address.upper() if args.address else (last or {}).get("address")
-    app.allow_delete = args.allow_delete
+    app.allow_delete = not args.no_delete
     if app.target:                   # its gallery as it was last time, before the camera is reached
         app.use_camera(app.target, (app.registry.get(app.target) or {}).get("name") or app.target)
     if args.off:
@@ -260,8 +260,8 @@ def main() -> None:
                                             "on Linux (default: the first one)")
     parser.add_argument("--home", help="Wi-Fi network to return to (default: the current one)")
     parser.add_argument("--stall", type=float, default=3.0, help="restart the session after N s without video")
-    parser.add_argument("--allow-delete", action="store_true", help="offer to delete files on the camera from the "
-                                                                    "gallery (experimental; off by default)")
+    parser.add_argument("--no-delete", action="store_true", help="don't offer to delete files on the camera")
+    parser.add_argument("--allow-delete", action="store_true", help=argparse.SUPPRESS)   # 1.3.0: deleting was opt-in
     parser.add_argument("--join-timeout", type=float, default=45)
     parser.add_argument("--approve-timeout", type=float, default=90)
     try:

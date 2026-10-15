@@ -1608,7 +1608,7 @@ async function toggleStar(f) {
   renderGallery();
   if (lbFile === f) lightboxButtons();
 }
-// Deleting is only offered when the app was started with --allow-delete. Each file is deleted once; one
+// Deleting asks first (hidden when the app was started with --no-delete). Each file is deleted once; one
 // that fails stays in the list.
 async function deleteFiles(files) {
   if (!files.length) return false;
