@@ -30,7 +30,7 @@ from camlink import ble, camera as cam, datalink, models, wifi
 from camlink.protocol import CAMERA_HOST
 from camlink.registry import DEFAULT_TRANSPORT, other_transport
 from camlink.util import fine_timer, log
-from camlink.video import H264Decoder
+from camlink.video import VideoDecoder
 from client.app import App
 from client.server import start_server
 from client.station import back_to_own_wifi, reach
@@ -43,10 +43,11 @@ async def run(args: argparse.Namespace) -> None:
     if args.downloads:
         app.downloader.base = Path(args.downloads)
     stop = threading.Event()
-    decoder = H264Decoder(app.on_frame, stop)
+    decoder = VideoDecoder(app.on_frame, stop)
     decoder.start()
     threading.Thread(target=app.settings_loop, args=(stop,), daemon=True, name="settings").start()
     threading.Thread(target=app.media_hold_loop, args=(stop,), daemon=True, name="media-hold").start()
+    threading.Thread(target=app.pocket_loop, args=(stop,), daemon=True, name="pocket-controls").start()
     start_server(app, args.port)
     if not args.no_browser:
         webbrowser.open(f"http://127.0.0.1:{args.port}/")
@@ -148,7 +149,9 @@ async def run(args: argparse.Namespace) -> None:
                     host = CAMERA_HOST
                     app.set_stage("wifi")
                     joined = True        # set first: a failed join may already have left the home network
-                    await asyncio.to_thread(wifi.join, link.ssid, link.password, args.join_timeout, args.interface)
+                    # an Osmo Pocket on 5.8 GHz can take about a minute to bring its access point up
+                    timeout = max(args.join_timeout, 90) if (known or {}).get("model_id") in models.POCKETS else args.join_timeout
+                    await asyncio.to_thread(wifi.join, link.ssid, link.password, timeout, args.interface)
                 app.camera_host = app.downloader.host = host
                 if transport.get("poke", True):
                     await asyncio.to_thread(datalink.poke, host)

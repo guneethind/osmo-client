@@ -176,6 +176,25 @@
   .headline .small { color: var(--muted); font-size: 12.5px; }
   .note { color: var(--faint); font-size: 12px; margin: 8px 0 0; }
   .note a { color: var(--accent); }
+  /* Osmo Pocket: gimbal and zoom */
+  .pocket-top { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pad { display: grid; grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); gap: 4px; }
+  .pad button, .zoom-row button { font: inherit; font-size: 16px; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--border-2); border-radius: 9px; cursor: pointer; touch-action: none; user-select: none; }
+  .pad button:hover:not(:disabled), .zoom-row button:hover:not(:disabled) { border-color: var(--muted); }
+  .pad button.held, .zoom-row button.held, .zoom-row button[aria-pressed=true] { border-color: var(--accent);
+    background: var(--border-2); }
+  .pad button:disabled, .zoom-row button:disabled { opacity: .45; cursor: default; }
+  .pad [data-dir=up] { grid-area: 1 / 2; } .pad [data-dir=left] { grid-area: 2 / 1; } .pad [data-g=recenter] { grid-area: 2 / 2; font-size: 14px; }
+  .pad [data-dir=right] { grid-area: 2 / 3; } .pad [data-dir=down] { grid-area: 3 / 2; }
+  .pocket-side { display: grid; gap: 8px; }
+  .pocket-side select { width: 100%; font: inherit; font-weight: 550; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 8px; }
+  .gimbal-read { color: var(--muted); font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0;
+    font-variant-numeric: tabular-nums; }
+  .zoom-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
+  .zoom-row button { min-width: 40px; height: 34px; padding: 0 9px; font-size: 13.5px; font-weight: 600; }
+  .zoom-row .now { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; }
   .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; margin-bottom: 12px;
          border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
   .seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 8px; border-radius: 7px;
@@ -461,6 +480,37 @@
   </section>
 
   <aside>
+    <div class="card" id="pocketCard" hidden>
+      <h3>Gimbal &amp; zoom <span class="gimbal-read" id="gRead"></span></h3>
+      <div class="pocket-top">
+        <div class="pad" role="group" aria-label="Gimbal">
+          <button data-dir="up" title="Tilt up (↑)">▲</button>
+          <button data-dir="left" title="Pan left (←)">◀</button>
+          <button data-g="recenter" title="Recenter (C)">⟲</button>
+          <button data-dir="right" title="Pan right (→)">▶</button>
+          <button data-dir="down" title="Tilt down (↓)">▼</button>
+        </div>
+        <div class="pocket-side">
+          <select id="gMode" aria-label="Gimbal mode">
+            <option value="" hidden>Mode</option><option value="follow">Follow</option>
+            <option value="tilt_lock">Tilt locked</option><option value="fpv">FPV</option>
+            <option value="direction_lock">Direction lock</option></select>
+          <select id="gSpeed" aria-label="Gimbal speed">
+            <option value="" hidden>Speed</option><option value="slow">Slow</option>
+            <option value="normal">Normal</option><option value="fast">Fast</option></select>
+          <button class="btn" data-g="flip" title="Turn the camera 180° (front / selfie)">Turn 180°</button>
+        </div>
+      </div>
+      <div class="zoom-row" id="zoomRow" role="group" aria-label="Zoom">
+        <button data-zoom="out" title="Zoom out while held (−)">−</button>
+        <span id="zoomStops" style="display:contents"></span>
+        <button data-zoom="in" title="Zoom in while held (+)">+</button>
+        <span class="now" id="zoomNow"></span>
+      </div>
+      <p class="note" id="pocketNote">Hold the arrows (or the arrow keys; Shift: faster) to move the gimbal, C recenters.
+        + and − zoom while held.</p>
+    </div>
+
     <div class="card">
       <h3>Camera</h3>
       <dl class="rows">
@@ -738,10 +788,14 @@ async function command(path, label) {
     busy = false; render();
   }
 }
+// The Osmo Pocket 4 / 4 Pro use 0x17 for Photo where the other cameras use 0x05.
+const modeCode = m => m.p === 0x05 && OPTS && OPTS.capture_modes && !OPTS.capture_modes.includes(0x05)
+  && OPTS.capture_modes.includes(0x17) ? 0x17 : m.p;
 async function setMode(m) {
-  if (!ready() || busy || S.capture_mode === m.p || isRecording() || !modeAvailable(m.p)) return;
-  pendingMode = m.p; render();
-  await command('/api/mode/' + m.p, `Mode → ${m.name}`);
+  const p = modeCode(m);
+  if (!ready() || busy || S.capture_mode === p || isRecording() || !modeAvailable(p)) return;
+  pendingMode = p; render();
+  await command('/api/mode/' + p, `Mode → ${m.name}`);
   pendingMode = null; render();
 }
 async function shutter() {
@@ -764,9 +818,109 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); shutter(); }
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1]);
+  if (pocketKey(e, true)) return;
   const tool = TOOL_KEYS[e.key.toLowerCase()];
   if (tool) toggleTool(tool);
 });
+document.addEventListener('keyup', e => pocketKey(e, false));
+window.addEventListener('blur', () => { keysHeld.clear(); updateStick(); zoomHold(null); });
+
+// ---- Osmo Pocket: gimbal and zoom (the card shows only while a Pocket is connected)
+const STICK = { up: [1, 0], down: [-1, 0], left: [0, -1], right: [0, 1] };   // [tilt, pan]
+const KEY_DIRS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+const keysHeld = new Set(), padHeld = new Set();
+let stickGain = 0.6, stickTimer = null, zoomDir = null, zoomTimer = null;
+const isPocket = () => !!(S && S.pocket && ready());
+function stickVector() {
+  let tilt = 0, pan = 0;
+  for (const d of [...keysHeld, ...padHeld]) { tilt += STICK[d][0]; pan += STICK[d][1]; }
+  return [Math.max(-1, Math.min(1, tilt)) * stickGain, Math.max(-1, Math.min(1, pan)) * stickGain];
+}
+// While a direction is held the page repeats the stick every 150 ms; the app streams it to the camera and
+// lets go when the page stops (so a closed page never leaves the gimbal turning).
+function updateStick() {
+  const [tilt, pan] = stickVector();
+  const send = () => fetch('/api/gimbal/stick', { method: 'POST', body: JSON.stringify({ tilt, pan }) }).catch(() => {});
+  clearInterval(stickTimer); stickTimer = null;
+  send();
+  if (tilt || pan) stickTimer = setInterval(send, 150);
+  for (const b of document.querySelectorAll('.pad [data-dir]')) b.classList.toggle('held', keysHeld.has(b.dataset.dir) || padHeld.has(b.dataset.dir));
+}
+function zoomHold(dir) {
+  if (dir === zoomDir) return;
+  zoomDir = dir;
+  clearInterval(zoomTimer); zoomTimer = null;
+  const send = () => fetch('/api/zoom', { method: 'POST', body: JSON.stringify({ move: zoomDir || 'stop' }) }).catch(() => {});
+  send();
+  if (dir) zoomTimer = setInterval(send, 300);
+  for (const b of document.querySelectorAll('[data-zoom]')) b.classList.toggle('held', b.dataset.zoom === dir);
+}
+function pocketKey(e, down) {
+  if (!isPocket() || e.target.closest('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return false;
+  const dir = KEY_DIRS[e.key];
+  if (dir) {
+    e.preventDefault();
+    if (e.repeat) return true;
+    stickGain = e.shiftKey ? 1 : 0.6;
+    down ? keysHeld.add(dir) : keysHeld.delete(dir);
+    updateStick();
+    return true;
+  }
+  if (e.key === '+' || e.key === '=' || e.key === '-') {
+    if (!e.repeat) zoomHold(down ? (e.key === '-' ? 'out' : 'in') : null);
+    return true;
+  }
+  if (down && (e.key === 'c' || e.key === 'C') && !e.repeat) { gimbal('recenter'); return true; }
+  return false;
+}
+async function gimbal(action, value) {
+  const label = { recenter: 'Gimbal recentered', flip: 'Gimbal turned 180°' }[action] || `Gimbal ${action} → ${value}`;
+  const r = await postJSON('/api/gimbal', { action, value }, label);
+  return r;
+}
+for (const b of document.querySelectorAll('.pad [data-dir]')) {
+  const press = e => { e.preventDefault(); b.setPointerCapture(e.pointerId); stickGain = e.shiftKey ? 1 : 0.6; padHeld.add(b.dataset.dir); updateStick(); };
+  const release = () => { if (padHeld.delete(b.dataset.dir)) updateStick(); };
+  b.addEventListener('pointerdown', press);
+  b.addEventListener('pointerup', release);
+  b.addEventListener('pointercancel', release);
+  b.addEventListener('lostpointercapture', release);
+}
+for (const b of document.querySelectorAll('[data-g]')) b.onclick = () => gimbal(b.dataset.g);
+$('gMode').onchange = e => { e.target.blur(); gimbal('mode', e.target.value); };
+$('gSpeed').onchange = e => { e.target.blur(); gimbal('speed', e.target.value); };
+for (const b of document.querySelectorAll('[data-zoom]')) {
+  b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); zoomHold(b.dataset.zoom); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => zoomHold(null));
+}
+$('zoomStops').addEventListener('click', e => {
+  const b = e.target.closest('[data-factor]');
+  if (b) postJSON('/api/zoom', { factor: +b.dataset.factor }, `Zoom → ${b.dataset.factor}×`);
+});
+const GIMBAL_MODE_LABEL = { follow: 'Follow', fpv: 'FPV', direction_lock: 'Direction lock', tilt_lock: 'Tilt locked' };
+function renderPocket(s) {
+  const pk = s && s.pocket, on = !!pk && ready();
+  $('pocketCard').hidden = !pk;
+  if (!pk) return;
+  for (const b of $('pocketCard').querySelectorAll('button')) b.disabled = !on;
+  $('gMode').disabled = $('gSpeed').disabled = !on;
+  const g = pk.gimbal;
+  $('gRead').textContent = g ? `· pan ${g.pan.toFixed(0)}° · tilt ${g.tilt.toFixed(0)}°` : '';
+  if (g && g.mode && document.activeElement !== $('gMode') && $('gMode').value !== 'tilt_lock') $('gMode').value = g.mode;
+  const stops = pk.zoom_stops || [];
+  setHTML($('zoomStops'), stops.map(f => `<button data-factor="${f}" title="Zoom ${f}×">${f}×</button>`).join(''));
+  for (const b of $('zoomStops').children) {
+    b.disabled = !on;
+    b.setAttribute('aria-pressed', String(pk.zoom != null && Math.abs(pk.zoom - +b.dataset.factor) < 0.15));
+  }
+  $('zoomRow').hidden = !stops.length;
+  $('zoomNow').textContent = pk.zoom != null ? pk.zoom.toFixed(1) + '×' : '';
+  // The Pocket 4 Pro refuses to zoom in D-Log2 (0x41): it takes D-Log.
+  const dlog2 = pk.model_id === 0x22 && s.image && s.image.color === 0x41;
+  $('pocketNote').textContent = dlog2 ? 'Zoom is not available in D-Log2: switch the color profile to D-Log to zoom.'
+    : 'Hold the arrows (or the arrow keys; Shift: faster) to move the gimbal, C recenters. + and − zoom while held.';
+  if (!on) { if (keysHeld.size || padHeld.size) { keysHeld.clear(); padHeld.clear(); updateStick(); } zoomHold(null); }
+}
 
 // ---- monitoring tools (monitor.js): scopes, assists, guides and a display LUT over the live view
 const viewer = $('view').parentElement;
@@ -1176,6 +1330,7 @@ function render() {
   $('stall').hidden = !stalled;
   if (stalled) $('stallText').textContent = (s.recovery || 'waiting for the picture…') + ` · ${Math.round(s.video_age)} s`;
   $('veil').hidden = !veil;
+  renderPocket(s);
   Monitor.update(!veil, !!(s && s.image && s.image.log));
   if (veil) { $('veilTitle').textContent = veil[0]; $('veilText').textContent = veil[1]; $('veilSpin').hidden = !veil[2]; }
   $('veilBtn').hidden = !off && !select;
@@ -1206,7 +1361,7 @@ function render() {
   // capture modes
   if (s && optsKey(s) !== optsFor) { optsFor = optsKey(s); loadOptions(); }
   for (const b of modesEl.children) {
-    const p = +b.dataset.p;
+    const p = modeCode(MODES.find(m => m.p === +b.dataset.p));
     b.hidden = !modeAvailable(p);     // modes this camera doesn't list
     b.setAttribute('aria-pressed', String(!!s && s.capture_mode === p && pendingMode == null));
     b.classList.toggle('pending', pendingMode === p);

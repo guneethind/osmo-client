@@ -44,8 +44,9 @@ endorsed by or sponsored by DJI.
   <https://github.com/erik-sutton95/OpenPocketCine> — Apache License 2.0 (Copyright 2026 Erik Sutton and
   OpenPocketCine contributors). The live view's picture header and private SEI, the exposure
   compensation, image, timelapse and storage commands, and the monitoring tools' algorithms and constants
-  (false color bands, zebra and focus peaking thresholds, scope layouts, the .cube LUT layout) follow that
-  project's code and documentation. No code from it is included here.
+  (false color bands, zebra and focus peaking thresholds, scope layouts, the .cube LUT layout) and the Osmo
+  Pocket support (session, H.265 live view, gimbal and zoom commands) follow that project's code and
+  documentation. No code from it is included here.
 
 ## Dependencies
 

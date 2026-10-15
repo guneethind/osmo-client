@@ -8,7 +8,11 @@ exposure and format settings, camera status, and a gallery to preview and downlo
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
-> **New in 1.3: a field monitor.** Scopes, false color, zebras, focus peaking, frame guides and a display
+> **New in 1.4 (experimental): Osmo Pocket 3, 4 and 4 Pro.** Live view (H.265 on the Pocket 4 and 4 Pro),
+> gimbal and zoom controls. Built from another project's notes on these cameras, **not tested with a real
+> Pocket yet**: reports are welcome.
+>
+> **Since 1.3: a field monitor.** Scopes, false color, zebras, focus peaking, frame guides and a display
 > LUT over the live view; exposure compensation and the camera's light meter; color profile (D-Log M),
 > field of view and stabilization; timelapse and hyperlapse settings; gallery favorites; a steadier live
 > view. Experimental: the camera can join your Wi-Fi network instead of the computer joining the camera's.
@@ -64,9 +68,14 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 - **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
   computer back on its own Wi-Fi without closing the app.
 
-Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 3/4) use the same protocol and may work, fully or in
-part; the commands were mapped on the Osmo Nano and only the Nano has been tested. The Osmo 360 is not
-supported.
+**Osmo Pocket 3, 4 and 4 Pro (experimental):** the live view (H.265 on the Pocket 4 and 4 Pro) and, only
+while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
+to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
+speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4 Pro) or hold − / + (keys `-` `+`). Built
+from the OpenPocketCine project's notes; not tested with this app yet.
+
+Other DJI Osmo cameras (Action 4/5 Pro/6) use the same protocol and may work, fully or in part; the
+commands were mapped on the Osmo Nano. The Osmo 360 is not supported.
 
 Need the camera as a webcam for video calls? See the companion app,
 **[OsmoCam](https://github.com/luisreysan/osmocam)**.

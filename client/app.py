@@ -12,8 +12,8 @@ import urllib.request
 from camlink import ble, camera as cam, media
 from camlink.datalink import Datalink
 from camlink.duml import Message
-from camlink.models import MODELS, TESTED_MODELS
-from camlink.protocol import CAMERA_HOST
+from camlink.models import MODELS, POCKETS, TESTED_MODELS
+from camlink.protocol import ADDR_GIMBAL, CAMERA_HOST
 from camlink.registry import CameraRegistry
 from camlink.util import data_dir, log
 
@@ -47,6 +47,12 @@ class App:
         self.settings_due = threading.Event()  # read the settings back now (after a mode switch)
         self.video_grace = 0.0                 # monotonic() until which a pause in the video is expected
         self.recovery: str | None = None       # what the live view watchdog is doing (for the page)
+        # Osmo Pocket controls held from the page: refreshed by it while held, stopped when it goes quiet
+        self._stick = (0.0, 0.0)               # tilt, pan in -1..1
+        self._stick_seen = 0.0
+        self._stick_on = False
+        self._zoom_seen = 0.0
+        self._zoom_moving = False
         # Media library. Listing runs in the camera's media mode (no live view meanwhile).
         self.media = {"state": "idle", "error": None, "updated": None, "stores": {}, "files": []}
         self._media_lock = threading.Lock()
@@ -109,6 +115,8 @@ class App:
             self.state.update_battery(m.payload)
         elif m.command == (0x02, 0xDC):
             self.state.update_stores(m.payload)
+        elif m.command == (0x04, 0x05):
+            self.state.update_attitude(m.payload)
         elif m.command == (0x00, 0x99):
             self.state.update_topic(m.payload)
 
@@ -214,6 +222,74 @@ class App:
 
     def set_hyperlapse(self, ratio: int) -> dict:
         return self.request(0x02, cam.LAPSE_SET, cam.hyperlapse_payload(ratio))
+
+    # ---- Osmo Pocket: gimbal and zoom --------------------------------------------------------------
+    def pocket_model(self) -> int | None:
+        """Model id of the active camera when it is an Osmo Pocket (gimbal and zoom), else None."""
+        model = (self.registry.get(self.target) or {}).get("model_id")
+        return model if model in POCKETS else None
+
+    def gimbal(self, action: str, value: str | None = None) -> dict:
+        """recenter, flip (turn 180°), mode (follow / tilt_lock / fpv / direction_lock), speed."""
+        if action in ("recenter", "flip"):
+            payload = cam.GIMBAL_RECENTER if action == "recenter" else cam.GIMBAL_FLIP
+            return self.request(0x04, 0x4C, payload, receiver=ADDR_GIMBAL)
+        if action == "mode" and value in cam.GIMBAL_MODES:
+            result: dict = {"ok": True}
+            for cmd_id, payload in cam.GIMBAL_MODES[value]:
+                result = self.request(0x04, cmd_id, payload, receiver=ADDR_GIMBAL)
+                if not result.get("ok"):
+                    break
+            return result
+        if action == "speed" and value in cam.GIMBAL_SPEEDS:
+            return self.request(0x04, 0x50, bytes((0, 5, 1, cam.GIMBAL_SPEEDS[value])), receiver=ADDR_GIMBAL)
+        return {"ok": False, "error": "unknown gimbal action"}
+
+    def set_stick(self, tilt: float, pan: float) -> None:
+        """Hold the stick at (tilt, pan); (0, 0) releases it. The page repeats this while a control is
+        held; pocket_loop() streams it to the camera and releases it when the page goes quiet."""
+        self._stick = (max(-1.0, min(1.0, tilt)), max(-1.0, min(1.0, pan)))
+        self._stick_seen = time.monotonic()
+
+    def zoom_to(self, factor: float) -> dict:
+        return self.request(0x02, 0xB8, cam.zoom_payload(factor))
+
+    def zoom_move(self, direction: str | None) -> dict:
+        """'in' / 'out' while a zoom button is held (repeated by the page), None to stop."""
+        if direction is None:
+            self._zoom_moving = False
+            return self.request(0x02, 0xB8, cam.ZOOM_STOP)
+        self._zoom_seen = time.monotonic()
+        if self._zoom_moving:
+            return {"ok": True}
+        self._zoom_moving = True
+        return self.request(0x02, 0xB8, cam.zoom_move_payload(direction == "in"))
+
+    def pocket_loop(self, stop: threading.Event) -> None:
+        """Stream the held stick every 50 ms (one centred packet on release, then nothing: a stream of
+        centred packets pauses the video), and stop a held zoom when the page stops renewing it."""
+        while not stop.wait(0.05):
+            link, now = self.datalink, time.monotonic()
+            try:
+                tilt, pan = self._stick
+                held = (tilt or pan) and now - self._stick_seen < 0.5
+                if held and link is not None:
+                    attitude = self.state.gimbal()
+                    if attitude and abs(attitude["pan"]) > cam.FLIPPED_YAW:
+                        pan = -pan           # turned 180°: left and right swap
+                    link.send(0x04, 0x01, cam.gimbal_stick(tilt, pan), ADDR_GIMBAL, 0x00)
+                    self._stick_on = True
+                elif self._stick_on:
+                    self._stick_on = False
+                    self._stick = (0.0, 0.0)
+                    if link is not None:
+                        link.send(0x04, 0x01, cam.gimbal_stick(0, 0), ADDR_GIMBAL, 0x00)
+                if self._zoom_moving and now - self._zoom_seen > 0.8:
+                    self.zoom_move(None)
+            except OSError:
+                pass
+            except Exception as error:  # noqa: BLE001 - never let this thread die
+                log(f"Pocket controls: {error}")
 
     def set_frame_rate(self, code: int) -> dict:
         """Keep the current resolution, change the frame rate."""
@@ -455,6 +531,14 @@ class App:
         snap["video_age"] = round(time.monotonic() - self.last_frame, 1) if self.last_frame else None
         snap["link"] = self.link
         snap["recovery"] = self.recovery
+        pocket = self.pocket_model()
+        settings = snap.get("settings") or {}
+        snap["pocket"] = None if pocket is None else {
+            "model_id": pocket,
+            "gimbal": self.state.gimbal(),
+            "zoom": self.state.zoom(),
+            "zoom_stops": cam.zoom_stops(pocket, settings.get("resolution_code"), snap.get("capture_mode")),
+        }
         snap["home"] = self.home
         snap["media_state"] = self.media["state"]
         snap["downloads_active"] = self.downloader.active()

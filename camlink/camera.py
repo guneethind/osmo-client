@@ -24,6 +24,16 @@ All of this was verified on an Osmo Nano; the full description is in docs/PROTOC
 The commands from exposure compensation down follow the capability tables an Osmo Nano publishes; they
 were not all exercised on one yet.
 
+Osmo Pocket 3 / 4 / 4 Pro only (OpenPocketCine's notes, not exercised with this app yet):
+
+    gimbal (receiver 0x04)  04/4C [FE 08] recenter, [FE 09] turn 180°; modes: 04/4C [02 08] + 04/50 [00 04 01 00]
+                            follow, + [.. 01] tilt locked, 04/4C [01 08] FPV, [00 08] direction lock;
+                            speed 04/50 [00 05 01 <0 fast, 1 normal, 2 slow>];
+                            stick 04/01 (flags 00, no reply) [tilt u16, 00 00, pan u16, 00 80 22 00], 1024 ± 550
+    gimbal attitude push    04/05, 50 bytes: pan (yaw) i16 at 4, tilt = −i16 at 20 (0.1°), mode = byte 6 >> 6
+    zoom (receiver 0x01)    02/B8 [0A 4E <lens u16>] to a factor (lens = 217 × factor); [01 <rate> <1 in, 0 out> 00]
+                            while held, [FF 00 00 00] stop; read back from cam_lens_state (u16 at 14)
+
 Replies start with a result code: 00 = OK, E0 = command not supported, E3 = invalid parameter (or not
 allowed in the current state, e.g. ISO while exposure is on Auto), DF = not available right now.
 
@@ -37,9 +47,10 @@ from __future__ import annotations
 import re
 
 # Capture modes: the value of 02/E1, also byte 57 of the 02/80 status push.
-MODES = {0x05: "Photo", 0x01: "Video", 0x28: "Super Night", 0x00: "Slow-mo", 0x02: "Timelapse", 0x0A: "Hyperlapse"}
-PHOTO_MODES = {0x05}
-MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE, MODE_HYPERLAPSE = 0x01, 0x00, 0x02, 0x0A
+MODES = {0x05: "Photo", 0x01: "Video", 0x28: "Super Night", 0x00: "Slow-mo", 0x02: "Timelapse", 0x0A: "Hyperlapse",
+         0x17: "Photo"}                  # 0x17: Photo on the Osmo Pocket 4 / 4 Pro
+PHOTO_MODES = {0x05, 0x17}
+MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE, MODE_HYPERLAPSE, MODE_SUPER_NIGHT = 0x01, 0x00, 0x02, 0x0A, 0x28
 
 RESULT_TEXT = {0xE0: "command not supported", 0xE3: "invalid parameter", 0xDF: "not available right now"}
 RECORD_STATES = ("idle", "starting", "recording", "stopping")
@@ -109,6 +120,29 @@ EIS_LABELS = {0x00: "Off", 0x01: "RockSteady", 0x02: "HorizonSteady", 0x03: "Roc
 LAPSE_SET = 0x6C
 LAPSE_SAVE = {0x00: "Video", 0x02: "JPEG + video", 0x03: "RAW + video"}
 
+# ---- Osmo Pocket: gimbal and zoom
+GIMBAL_RECENTER = bytes.fromhex("fe08")
+GIMBAL_FLIP = bytes.fromhex("fe09")
+# Each mode is one or two commands: (command id, payload)
+GIMBAL_MODES = {
+    "follow": [(0x4C, bytes.fromhex("0208")), (0x50, bytes.fromhex("00040100"))],
+    "tilt_lock": [(0x4C, bytes.fromhex("0208")), (0x50, bytes.fromhex("00040101"))],
+    "fpv": [(0x4C, bytes.fromhex("0108"))],
+    "direction_lock": [(0x4C, bytes.fromhex("0008"))],
+}
+GIMBAL_MODE_NAMES = {0: "direction_lock", 1: "fpv", 2: "follow"}   # attitude byte 6 >> 6
+GIMBAL_SPEEDS = {"fast": 0, "normal": 1, "slow": 2}
+STICK_CENTER, STICK_RANGE = 1024, 550    # the camera ignores values beyond ± 550
+FLIPPED_YAW = 165.0                      # past this pan angle the camera faces you: pan is mirrored
+# Zoom: lens position = 217 × factor. Stops each model offers; on the Pocket 3 the top one depends on
+# the resolution (4K 2×, 2.7K 3×, 1080p 4×); Slow-mo, Timelapse and Super Night stay at 1×.
+ZOOM_UNIT = 217
+ZOOM_STOPS = {0x0020: [1, 2, 4], 0x0021: [1, 2, 4], 0x0022: [1, 3, 6, 12]}
+POCKET3_ZOOM_MAX = {0x0A: 4, 0x0C: 4, 0x42: 4, 0x69: 4, 0x2D: 3, 0x43: 3, 0x5F: 3, 0x6A: 3,
+                    0x10: 2, 0x67: 2, 0x7D: 2, 0x6B: 2, 0x6C: 2}
+ZOOM_RATE = 0x4A
+ZOOM_STOP = bytes.fromhex("ff000000")
+
 # Media mode (gallery): the live view stops and files can be listed and downloaded.
 ENTER_MEDIA = bytes.fromhex("01010001")
 LEAVE_MEDIA = bytes.fromhex("01010000")
@@ -163,6 +197,48 @@ def fov_label(code: int) -> str:
 
 def eis_label(code: int) -> str:
     return EIS_LABELS.get(code, f"Mode {code}")
+
+
+def gimbal_stick(tilt: float, pan: float) -> bytes:
+    """04/01 payload for stick deflections in -1..1 (tilt up and pan right positive)."""
+    axis = lambda v: STICK_CENTER + round(max(-1.0, min(1.0, v)) * STICK_RANGE)  # noqa: E731
+    return axis(tilt).to_bytes(2, "little") + bytes(2) + axis(pan).to_bytes(2, "little") + bytes.fromhex("00802200")
+
+
+def parse_attitude(p: bytes) -> dict | None:
+    """04/05 gimbal attitude push (50 bytes): pan and tilt in degrees, and the gimbal mode."""
+    if len(p) != 50:
+        return None
+    i16 = lambda at: int.from_bytes(p[at:at + 2], "little", signed=True)  # noqa: E731
+    return {"pan": i16(4) / 10, "tilt": -i16(20) / 10, "mode": GIMBAL_MODE_NAMES.get(p[6] >> 6)}
+
+
+def zoom_payload(factor: float) -> bytes:
+    return bytes.fromhex("0a4e") + round(ZOOM_UNIT * factor).to_bytes(2, "little")
+
+
+def zoom_move_payload(zoom_in: bool) -> bytes:
+    return bytes((0x01, ZOOM_RATE, 1 if zoom_in else 0, 0))
+
+
+def zoom_from_lens_state(data: bytes) -> float | None:
+    """Zoom factor from the cam_lens_state topic (lens position, u16 at 14)."""
+    if len(data) < 16:
+        return None
+    lens = int.from_bytes(data[14:16], "little")
+    return round(lens / ZOOM_UNIT, 1) if 100 <= lens <= 3000 else None
+
+
+def zoom_stops(model_id: int | None, resolution: int | None, capture_mode: int | None) -> list[int]:
+    stops = ZOOM_STOPS.get(model_id or 0, [])
+    if not stops:
+        return []
+    if capture_mode in (MODE_SLOWMO, MODE_TIMELAPSE, MODE_SUPER_NIGHT):
+        return [1, 3] if model_id == 0x0022 else [1]
+    if model_id == 0x0020 and resolution in POCKET3_ZOOM_MAX:
+        top = POCKET3_ZOOM_MAX[resolution]
+        return [s for s in stops if s < top] + [top]
+    return stops
 
 
 def shutter_payload(raw: int) -> bytes:
@@ -298,7 +374,7 @@ CAPABILITY_TOPICS = ("camcap_base", "camcap_video_format", "camcap_iso", "camcap
                      "camcap_photo_size", "camcap_wb", "camcap_color_mode", "camcap_fov", "camcap_eis",
                      "camcap_sharpness", "camcap_denoise", "camcap_photo_timer_interval",
                      "camcap_timelapse_duration", "camcap_hyperlapse_ratio")
-SUBSCRIBED_TOPICS = ("cam_expo_param", "cam_image_effect", "cam_lapse_param") + CAPABILITY_TOPICS
+SUBSCRIBED_TOPICS = ("cam_expo_param", "cam_image_effect", "cam_lapse_param", "cam_lens_state") + CAPABILITY_TOPICS
 
 
 def _entries(table: bytes, width: int, at: int = 0) -> list[bytes] | None:

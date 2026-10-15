@@ -282,6 +282,32 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._bad("exposure compensation is -9 to +9 thirds of a stop")
                 else:
                     self._json(app.set_setting(0x2E, bytes((cam.EV_ZERO + thirds,))))
+            elif path in ("/api/gimbal", "/api/gimbal/stick", "/api/zoom"):
+                if app.pocket_model() is None:
+                    self._bad("only on Osmo Pocket cameras")
+                    return
+                try:
+                    body = self._body()
+                    if path == "/api/gimbal/stick":
+                        app.set_stick(float(body.get("tilt", 0)), float(body.get("pan", 0)))
+                        self._json({"ok": True})
+                    elif path == "/api/gimbal":
+                        self._json(app.gimbal(str(body["action"]), body.get("value")))
+                    elif body.get("factor") is not None:
+                        factor = float(body["factor"])
+                        stops = cam.ZOOM_STOPS.get(app.pocket_model(), [1])
+                        if not 1 <= factor <= max(stops):
+                            self._bad(f"zoom goes from 1x to {max(stops)}x")
+                        else:
+                            self._json(app.zoom_to(factor))
+                    else:
+                        move = body.get("move")
+                        if move not in ("in", "out", "stop"):
+                            self._bad("expected {factor} or {move: in|out|stop}")
+                        else:
+                            self._json(app.zoom_move(None if move == "stop" else move))
+                except (ValueError, KeyError, TypeError):
+                    self._bad("bad request")
             elif path == "/api/image":
                 try:
                     body = self._body()

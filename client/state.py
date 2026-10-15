@@ -17,6 +17,8 @@ class CameraState:
         self.raw_status = b""
         self.battery: dict | None = None
         self.stores: dict[str, dict] = {}    # 02/DC: storage by store (sd / internal), last non-zero values
+        self.attitude: dict | None = None   # Osmo Pocket gimbal (04/05 push)
+        self.last_attitude = 0.0
         self.topics: dict[str, dict] = {}   # name -> {data, count, t}
         self.caps: dict[str, object] = {}   # capability topic -> decoded table (for the current capture mode)
         self.caps_version = 0               # bumped whenever a table changes
@@ -43,6 +45,21 @@ class CameraState:
         with self._lock:
             self.battery = battery
             self.last_battery = time.monotonic()
+
+    def update_attitude(self, payload: bytes) -> None:
+        attitude = cam.parse_attitude(bytes(payload))
+        if attitude is not None:
+            with self._lock:
+                self.attitude, self.last_attitude = attitude, time.monotonic()
+
+    def gimbal(self) -> dict | None:
+        """The gimbal's attitude while the camera reports it (Osmo Pocket)."""
+        with self._lock:
+            return self.attitude if self.attitude and time.monotonic() - self.last_attitude < 2 else None
+
+    def zoom(self) -> float | None:
+        with self._lock:
+            return self._topic("cam_lens_state", cam.zoom_from_lens_state)
 
     def update_stores(self, payload: bytes) -> None:
         """02/DC. In playback the camera reports zeros for the microSD: keep the last real values."""
