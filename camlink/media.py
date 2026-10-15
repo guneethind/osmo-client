@@ -22,7 +22,8 @@ rate is a u32 numerator followed by a u32 denominator of 1000 or 1001 within its
 favourite mark: 01 after the bytes 1b 0a 00 00 00 02 02 01 14 02 15 03 in the record, or (T-1 = ff/fe)
 T+8 = 01.
 
-Favourite and delete (OpenPocketCine's notes; the delete layout is the one osmosis documents):
+Favourite and delete (OpenPocketCine's notes; the delete layout is the one osmosis documents), verified on an
+Osmo Nano:
 
     favourite         02/BF [01 01 <handle u32> <counter u32> 00 <0|1> 00 00 00]
     delete            00/28 [01 <handle u32> <counter u32> 00 01 00 00 00 01 01 00 00]   never re-sent
