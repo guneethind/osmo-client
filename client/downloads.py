@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from camlink import media
+from camlink.protocol import CAMERA_HOST
 from camlink.util import log
 
 
@@ -54,6 +55,7 @@ class Downloader:
     def __init__(self, base: Path) -> None:
         self.base = base
         self.sub = ""                     # active camera's name
+        self.host = CAMERA_HOST           # active camera's address
         self.items: dict[int, dict] = {}
         self._lock = threading.Lock()
         self._queue: queue.Queue[int] = queue.Queue()
@@ -135,7 +137,7 @@ class Downloader:
             item["done"], item["state"] = item["size"], "done"
             return
         part = final.with_name(final.name + ".part")
-        url = media.http_url(item["storage"], item["path"])
+        url = media.http_url(item["storage"], item["path"], self.host)
         failures = 0
         started, start_bytes = time.monotonic(), None
         while True:

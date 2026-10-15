@@ -16,6 +16,7 @@ class CameraState:
         self.storage: dict | None = None    # last storage counters outside playback (playback zeroes them)
         self.raw_status = b""
         self.battery: dict | None = None
+        self.stores: dict[str, dict] = {}    # 02/DC: storage by store (sd / internal), last non-zero values
         self.topics: dict[str, dict] = {}   # name -> {data, count, t}
         self.caps: dict[str, object] = {}   # capability topic -> decoded table (for the current capture mode)
         self.caps_version = 0               # bumped whenever a table changes
@@ -43,6 +44,16 @@ class CameraState:
             self.battery = battery
             self.last_battery = time.monotonic()
 
+    def update_stores(self, payload: bytes) -> None:
+        """02/DC. In playback the camera reports zeros for the microSD: keep the last real values."""
+        stores = cam.parse_storage(payload)
+        if stores is None:
+            return
+        with self._lock:
+            for name, store in stores.items():
+                if store["total_mb"]:
+                    self.stores[name] = store
+
     def update_topic(self, payload: bytes) -> None:
         parsed = cam.parse_topic(bytes(payload))
         if parsed is None:
@@ -55,6 +66,9 @@ class CameraState:
             topic["count"] += 1
             if table is not None and self.caps.get(name) != table:
                 self.caps[name] = table
+                self.caps_version += 1
+            elif table is None and data[:1] == b"\x00" and name in self.caps:
+                del self.caps[name]           # not offered in the new capture mode
                 self.caps_version += 1
 
     def capabilities(self) -> tuple[int, dict]:
@@ -86,6 +100,15 @@ class CameraState:
             return None
         return cam.exposure_from_topic(topic["data"])
 
+    def _topic(self, name: str, parse):
+        """A topic the camera pushes only when it changes (and once on subscribing): no age limit."""
+        topic = self.topics.get(name)
+        return parse(topic["data"]) if topic else None
+
+    def lapse(self) -> dict | None:
+        with self._lock:
+            return self._topic("cam_lapse_param", cam.lapse_from_topic)
+
     @staticmethod
     def _quality(mode: int, storage: dict) -> tuple[str | None, float | None]:
         free = storage["free_mb"]
@@ -115,6 +138,9 @@ class CameraState:
                 "storage": None,
                 "battery": self.battery if now - self.last_battery < 10 else None,
                 "exposure": self._exposure(now),
+                "image": self._topic("cam_image_effect", cam.image_from_topic),
+                "lapse": self._topic("cam_lapse_param", cam.lapse_from_topic),
+                "stores": dict(self.stores),
                 "settings": self.settings if self.connected and now - self.last_settings < 10 else None,
                 "raw_status": self.raw_status.hex() if fresh else "",
                 "topics": len(self.topics),

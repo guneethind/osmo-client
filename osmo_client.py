@@ -9,6 +9,8 @@ How it connects: Bluetooth LE to find, pair and wake the camera (the first time 
 "OSMO" on its screen) and to read the password of its Wi-Fi access point; then the computer's Wi-Fi joins
 that access point and everything else runs over it. Keep internet on another adapter (Ethernet) while
 connected. "Disconnect" on the page, or Ctrl+C here, puts the computer's Wi-Fi back on its own network.
+Or the camera joins a Wi-Fi network the computer is on (a router, or the computer's hotspot) and the
+computer finds it there: set it per camera on the page (Cameras).
 
     python osmo_client.py
 """
@@ -25,11 +27,14 @@ import webbrowser
 from pathlib import Path
 
 from camlink import ble, camera as cam, datalink, models, wifi
+from camlink.protocol import CAMERA_HOST
 from camlink.registry import DEFAULT_TRANSPORT, other_transport
 from camlink.util import fine_timer, log
 from camlink.video import H264Decoder
 from client.app import App
 from client.server import start_server
+from client.station import back_to_own_wifi, reach
+from client.watchdog import FeedWatchdog
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -53,12 +58,16 @@ async def run(args: argparse.Namespace) -> None:
     # around and the user picks one.
     last = app.registry.last_used()
     app.target = args.address.upper() if args.address else (last or {}).get("address")
+    app.allow_delete = args.allow_delete
+    if app.target:                   # its gallery as it was last time, before the camera is reached
+        app.use_camera(app.target, (app.registry.get(app.target) or {}).get("name") or app.target)
     if args.off:
         app.want_link.clear()
     link: ble.BleLink | None = None
     session: datalink.Datalink | None = None
     task: asyncio.Future | None = None
     joined = False                   # the Wi-Fi was moved to the camera (so disconnecting restores it)
+    station = False                  # the camera was asked to join a shared network in this BLE session
 
     def wanted() -> bool:
         return app.want_link.is_set() and app.target is not None
@@ -69,9 +78,24 @@ async def run(args: argparse.Namespace) -> None:
         while time.monotonic() < end and wanted() and not app.target_changed.is_set() and not stop.is_set():
             await asyncio.sleep(0.25)
 
+    async def own_wifi() -> None:
+        nonlocal station
+        await back_to_own_wifi(link, app.registry, station)
+        station = False
+
+    async def reach_on_network(target: str, network: str, port: int) -> str:
+        """Station mode: the computer stays on its own network and the camera joins `network`."""
+        nonlocal joined, station
+        if joined:                   # coming from the camera's own access point
+            await asyncio.to_thread(wifi.restore, home, args.interface)
+            joined = False
+        station = True
+        return await reach(link, app.registry, target, network, port, app.set_stage, pause, wanted)
+
     async def release() -> None:
         nonlocal link, joined
         if link is not None:
+            await own_wifi()
             with contextlib.suppress(Exception):
                 await link.close()
             link = None
@@ -97,6 +121,7 @@ async def run(args: argparse.Namespace) -> None:
             target = app.target
             known = app.registry.get(target)
             app.link = "connecting"
+            network = (known or {}).get("network")
             try:
                 # Pair again whenever BLE dropped (camera asleep, off, restarted) or another camera was
                 # picked: pairing is also what wakes the camera's Wi-Fi.
@@ -114,15 +139,23 @@ async def run(args: argparse.Namespace) -> None:
                 if app.target != target or not wanted():
                     continue
                 app.use_camera(target, (known or {}).get("name") or link.name)
-                app.set_stage("wifi")
-                joined = True            # set first: a failed join may already have left the home network
-                await asyncio.to_thread(wifi.join, link.ssid, link.password, args.join_timeout, args.interface)
                 transport = (known or {}).get("transport") or dict(DEFAULT_TRANSPORT)
+                network = (known or {}).get("network")
+                if network:
+                    host = await reach_on_network(target, network, transport.get("port", datalink.DATALINK_PORT))
+                else:
+                    await own_wifi()     # it was on a shared network until now
+                    host = CAMERA_HOST
+                    app.set_stage("wifi")
+                    joined = True        # set first: a failed join may already have left the home network
+                    await asyncio.to_thread(wifi.join, link.ssid, link.password, args.join_timeout, args.interface)
+                app.camera_host = app.downloader.host = host
                 if transport.get("poke", True):
-                    await asyncio.to_thread(datalink.poke)
+                    await asyncio.to_thread(datalink.poke, host)
             except Exception as error:  # noqa: BLE001 - keep trying until the camera is back (Ctrl+C quits)
                 app.set_stage("error", str(error))
                 if link is not None:
+                    await own_wifi()     # never leave it on a network it could not be reached on
                     with contextlib.suppress(Exception):
                         await link.close()
                 link = None
@@ -138,7 +171,7 @@ async def run(args: argparse.Namespace) -> None:
             if not wanted() or app.target != target:
                 continue                 # disconnected or another camera picked while connecting
             app.set_stage("datalink")
-            session = datalink.Datalink(port=transport.get("port", datalink.DATALINK_PORT),
+            session = datalink.Datalink(port=transport.get("port", datalink.DATALINK_PORT), host=host,
                                         on_video=decoder.feed, on_message=app.on_message,
                                         liveview=models.liveview_mode((known or {}).get("model_id")),
                                         topics=cam.SUBSCRIBED_TOPICS)
@@ -147,26 +180,39 @@ async def run(args: argparse.Namespace) -> None:
             app.state.connected = True
             task = asyncio.ensure_future(asyncio.to_thread(session.run))
             started = time.monotonic()
+            watchdog = FeedWatchdog(args.stall, started)
             while not task.done() and not stop.is_set():
                 await asyncio.sleep(0.3)
+                now = time.monotonic()
                 if (session.last_video or app.state.last_status > started) and app.link != "on":
                     app.link = "on"
                     app.set_stage("on")
-                if not wanted() or app.target != target:
+                if app.last_frame > now - 1:
+                    app.recovery = None
+                if not wanted() or app.target != target or app.reconnect.is_set():
+                    app.reconnect.clear()
                     session.stop()
                 elif app.state.in_playback():
-                    started = time.monotonic()   # the gallery pauses the live view; the link is fine
-                elif (time.monotonic() - max(session.last_video, started, app.video_grace) > args.stall
-                      and not session.stopped.is_set()):
-                    log(f"No video, restarting the session ({session.summary()})")
-                    session.stop()
+                    watchdog.started = now       # the gallery pauses the live view; the link is fine
+                elif session.ready.is_set() and not session.stopped.is_set():
+                    step = watchdog.check(now, session.last_video, app.last_frame, app.video_grace,
+                                          session.frames.truncated if session.frames else 0)
+                    if step == "keyframe":
+                        log("Live view: no picture or a broken one, asked the camera for a fresh keyframe")
+                        app.recovery = "Asking the camera for a fresh picture…"
+                        with contextlib.suppress(OSError):
+                            session.request_keyframe()
+                    elif step == "restart":
+                        log(f"No video, restarting the session ({session.summary()})")
+                        app.recovery = "Restarting the video link…"
+                        session.stop()
             app.datalink = None
             app.state.connected = False
             session.stop()
             try:
                 await task
             except RuntimeError as error:
-                if "handshake" in str(error):
+                if "handshake" in str(error) and not network:
                     # Not every model listens where the Osmo Nano does (some rebadges use UDP 10004 without
                     # the TCP poke): try the other transport next time and remember it.
                     other = other_transport(transport)
@@ -194,6 +240,7 @@ async def run(args: argparse.Namespace) -> None:
         if joined:
             await asyncio.to_thread(wifi.restore, home, args.interface)
         if link is not None:
+            await own_wifi()
             with contextlib.suppress(Exception):
                 await link.close()
         log("Stopped.")
@@ -213,6 +260,8 @@ def main() -> None:
                                             "on Linux (default: the first one)")
     parser.add_argument("--home", help="Wi-Fi network to return to (default: the current one)")
     parser.add_argument("--stall", type=float, default=3.0, help="restart the session after N s without video")
+    parser.add_argument("--allow-delete", action="store_true", help="offer to delete files on the camera from the "
+                                                                    "gallery (experimental; off by default)")
     parser.add_argument("--join-timeout", type=float, default=45)
     parser.add_argument("--approve-timeout", type=float, default=90)
     try:

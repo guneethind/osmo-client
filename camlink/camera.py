@@ -13,6 +13,16 @@ All of this was verified on an Osmo Nano; the full description is in docs/PROTOC
     aspect 4:3 / 16:9    02/8E [01 01, 46 00, 01, 1|2] (parameter TLV); read [00 01 46 00]
     photo format         02/12 [size, ratio]; read 02/13 (photo mode only)
     white balance        02/2C [mode, kelvin / 100, 00, 00, 00]; read 02/2D
+    exposure comp. (EV)  02/2E [0x10 + thirds of a stop]   Auto only; read cam_expo_param
+    colour profile       02/42 [code]                  (see COLOR_MODES); read cam_image_effect
+    sharpness / noise    02/38 [s8] / 02/44 [s8]       read cam_image_effect
+    field of view        02/8E parameter 0x0009        (see FOV_LABELS)
+    stabilisation        02/8E parameter 0x0008        (see EIS_LABELS)
+    timelapse            02/6C [04 00 save, interval u16 LE (0.1 s), duration u32 LE (s), 00 x 7]
+    hyperlapse speed     02/6C [0B 00 00, ratio u16 LE (0 = auto), 00 x 11]; both read cam_lapse_param
+
+The commands from exposure compensation down follow the capability tables an Osmo Nano publishes; they
+were not all exercised on one yet.
 
 Replies start with a result code: 00 = OK, E0 = command not supported, E3 = invalid parameter (or not
 allowed in the current state, e.g. ISO while exposure is on Auto), DF = not available right now.
@@ -29,7 +39,7 @@ import re
 # Capture modes: the value of 02/E1, also byte 57 of the 02/80 status push.
 MODES = {0x05: "Photo", 0x01: "Video", 0x28: "Super Night", 0x00: "Slow-mo", 0x02: "Timelapse", 0x0A: "Hyperlapse"}
 PHOTO_MODES = {0x05}
-MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE = 0x01, 0x00, 0x02
+MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE, MODE_HYPERLAPSE = 0x01, 0x00, 0x02, 0x0A
 
 RESULT_TEXT = {0xE0: "command not supported", 0xE3: "invalid parameter", 0xDF: "not available right now"}
 RECORD_STATES = ("idle", "starting", "recording", "stopping")
@@ -84,6 +94,20 @@ PHOTO_MP = {(4, 0): 36, (4, 1): 31, (3, 0): 9, (3, 1): 8}
 # White balance: 02/2C [mode, kelvin / 100, 00, 00, 00]; mode 0 = auto, 6 = manual colour temperature.
 WB_AUTO, WB_MANUAL = 0x00, 0x06
 WB_KELVIN = range(2000, 10001, 100)
+# Exposure compensation: 02/2E [EV_ZERO + thirds of a stop], -3 to +3 EV (Auto exposure only).
+EV_ZERO = 0x10
+EV_THIRDS = range(-9, 10)
+# Colour profile: 02/42 [code]. The codes differ between models; these are the ones seen so far.
+COLOR_MODES = {0x00: "Normal", 0x3F: "Normal 10-bit", 0x3D: "D-Log M", 0x3C: "HLG", 0x17: "D-Log", 0x41: "D-Log2"}
+LOG_COLOR_MODES = {0x3D, 0x17, 0x41}
+SHARPNESS_SET, DENOISE_SET = 0x38, 0x44
+# 02/8E parameters (one byte each).
+PARAM_EIS, PARAM_FOV = 0x0008, 0x0009
+FOV_LABELS = {0x00: "Ultra Wide", 0x01: "Wide", 0x02: "Standard", 0x05: "Natural Wide"}
+EIS_LABELS = {0x00: "Off", 0x01: "RockSteady", 0x02: "HorizonSteady", 0x03: "RockSteady+", 0x04: "HorizonBalancing"}
+# Timelapse and hyperlapse settings share 02/6C; LAPSE_SAVE is what a timelapse keeps besides the video.
+LAPSE_SET = 0x6C
+LAPSE_SAVE = {0x00: "Video", 0x02: "JPEG + video", 0x03: "RAW + video"}
 
 # Media mode (gallery): the live view stops and files can be listed and downloaded.
 ENTER_MEDIA = bytes.fromhex("01010001")
@@ -95,6 +119,50 @@ _TOPIC_NAME = re.compile(rb"[a-z][a-z0-9_]{2,63}")
 def parameter_tlv_set(tlv_type: int, value: int) -> bytes:
     """02/8E payload setting one 1-byte parameter: [01 01][type u16 LE][length 1][value]."""
     return bytes((1, 1)) + tlv_type.to_bytes(2, "little") + bytes((1, value))
+
+
+def parameter_tlv_get(tlv_type: int) -> bytes:
+    """02/8E payload reading one parameter: [00 01][type u16 LE]."""
+    return bytes((0, 1)) + tlv_type.to_bytes(2, "little")
+
+
+def parameter_value(reply: bytes, tlv_type: int) -> int | None:
+    """Value from a 02/8E read reply: [00][00 01][type u16 LE][length 1][value]."""
+    if len(reply) >= 7 and reply[:3] == b"\x00\x00\x01" and int.from_bytes(reply[3:5], "little") == tlv_type:
+        return reply[6]
+    return None
+
+
+def signed_byte(value: int) -> int:
+    return value - 256 if value > 127 else value
+
+
+def timelapse_payload(save: int, interval_tenths: int, duration_s: int) -> bytes:
+    return bytes((0x04, 0, save)) + interval_tenths.to_bytes(2, "little") + duration_s.to_bytes(4, "little") + bytes(7)
+
+
+def hyperlapse_payload(ratio: int) -> bytes:
+    return bytes((0x0B, 0, 0)) + ratio.to_bytes(2, "little") + bytes(11)
+
+
+def ev_label(thirds: int) -> str:
+    """-4 -> '−1.3', 3 -> '+1.0', 0 -> '0'."""
+    if not thirds:
+        return "0"
+    whole, rest = divmod(abs(thirds), 3)
+    return ("+" if thirds > 0 else "−") + f"{whole}.{(0, 3, 7)[rest]}"
+
+
+def color_label(code: int) -> str:
+    return COLOR_MODES.get(code, f"Profile 0x{code:02x}")
+
+
+def fov_label(code: int) -> str:
+    return FOV_LABELS.get(code, f"FOV {code}")
+
+
+def eis_label(code: int) -> str:
+    return EIS_LABELS.get(code, f"Mode {code}")
 
 
 def shutter_payload(raw: int) -> bytes:
@@ -179,19 +247,58 @@ def parse_topic(p: bytes) -> tuple[str, bytes] | None:
 
 
 def exposure_from_topic(data: bytes) -> dict | None:
-    """ISO and shutter in use from the 'cam_expo_param' topic (real values, also in Auto)."""
+    """From the 'cam_expo_param' topic: ISO and shutter in use (real values, also in Auto), the exposure
+    compensation set (thirds of a stop, [6]) and the camera's own meter reading ([15], thirds of a stop
+    from what it considers correct; useful in Manual)."""
     if len(data) < 22:
         return None
+    thirds = lambda value: value - EV_ZERO if 0 < value < 2 * EV_ZERO else None  # noqa: E731
     return {"iso": int.from_bytes(data[16:20], "little") or None,
-            "shutter": shutter_text(int.from_bytes(data[20:22], "little"))}
+            "shutter": shutter_text(int.from_bytes(data[20:22], "little")),
+            "ev": thirds(data[6]),
+            "meter": thirds(data[15])}
+
+
+def image_from_topic(data: bytes) -> dict | None:
+    """From the 'cam_image_effect' topic: colour profile [2], noise reduction [14], sharpness [15]."""
+    if len(data) < 3:
+        return None
+    image = {"color": data[2], "log": data[2] in LOG_COLOR_MODES}
+    if len(data) > 15:
+        image.update(denoise=signed_byte(data[14]), sharpness=signed_byte(data[15]))
+    return image
+
+
+def lapse_from_topic(data: bytes) -> dict | None:
+    """From the 'cam_lapse_param' topic: what a timelapse keeps besides the video [0], interval [1-2] and
+    shortest interval [3-4] in tenths of a second, duration in seconds [5-8] (0 = until stopped),
+    hyperlapse speed [9-10] (0 = auto)."""
+    if len(data) < 11:
+        return None
+    u16 = lambda at: int.from_bytes(data[at:at + 2], "little")  # noqa: E731
+    return {"save": data[0], "interval": u16(1), "min_interval": u16(3),
+            "duration": int.from_bytes(data[5:9], "little"), "ratio": u16(9)}
+
+
+def parse_storage(p: bytes) -> dict | None:
+    """02/DC storage push: microSD total / free (MB) at [6] / [10], internal memory at [24] / [28]."""
+    if len(p) < 14:
+        return None
+    u32 = lambda offset: int.from_bytes(p[offset:offset + 4], "little")  # noqa: E731
+    stores = {"sd": {"total_mb": u32(6), "free_mb": u32(10)}}
+    if len(p) >= 32:
+        stores["internal"] = {"total_mb": u32(24), "free_mb": u32(28)}
+    return stores
 
 
 # Capability topics: what the current capture mode offers. The camera sends each one once when subscribed
 # and again when it changes (after a capture mode switch, for example). Layout: [0] supported (0 = no),
 # [1-2] u16 LE length, then the table, mostly a count followed by that many entries.
 CAPABILITY_TOPICS = ("camcap_base", "camcap_video_format", "camcap_iso", "camcap_shutter",
-                     "camcap_photo_size", "camcap_wb")
-SUBSCRIBED_TOPICS = ("cam_expo_param",) + CAPABILITY_TOPICS
+                     "camcap_photo_size", "camcap_wb", "camcap_color_mode", "camcap_fov", "camcap_eis",
+                     "camcap_sharpness", "camcap_denoise", "camcap_photo_timer_interval",
+                     "camcap_timelapse_duration", "camcap_hyperlapse_ratio")
+SUBSCRIBED_TOPICS = ("cam_expo_param", "cam_image_effect", "cam_lapse_param") + CAPABILITY_TOPICS
 
 
 def _entries(table: bytes, width: int, at: int = 0) -> list[bytes] | None:
@@ -229,16 +336,34 @@ def parse_capability(name: str, data: bytes):
         camcap_iso           ISO codes for 02/2A (Auto left out)
         camcap_shutter       raw shutter speeds for 02/28
         camcap_photo_size    (size, ratio) pairs for 02/12
-        camcap_wb            colour temperature range (K) for 02/2C"""
+        camcap_wb            colour temperature range (K) for 02/2C
+        camcap_color_mode    colour profile codes for 02/42
+        camcap_fov / _eis    field of view / stabilisation values for 02/8E
+        camcap_sharpness     sharpness levels for 02/38 (signed)
+        camcap_denoise       noise reduction levels for 02/44 (signed)
+        camcap_photo_timer_interval  timelapse intervals, in tenths of a second
+        camcap_timelapse_duration    timelapse durations in seconds (0 = until stopped)
+        camcap_hyperlapse_ratio      hyperlapse speeds (0 = auto)"""
     if len(data) < 4 or not data[0]:
         return None
     size = int.from_bytes(data[1:3], "little")
     table = data[3:3 + size]
     if len(table) < size:
         return None
-    if name == "camcap_base":
+    if name in ("camcap_base", "camcap_color_mode", "camcap_fov", "camcap_eis", "camcap_hyperlapse_ratio"):
         entries = _entries(table, 1)
         return [e[0] for e in entries] if entries is not None else None
+    if name in ("camcap_sharpness", "camcap_denoise"):
+        entries = _entries(table, 1)
+        return [signed_byte(e[0]) for e in entries] if entries is not None else None
+    if name == "camcap_timelapse_duration":
+        entries = _entries(table, 4)
+        return [int.from_bytes(e, "little") for e in entries] if entries is not None else None
+    if name == "camcap_photo_timer_interval":     # 4 header bytes, count, then [kind][seconds u16][ms u16]
+        entries = _entries(table, 5, 4)
+        if entries is None:
+            return None
+        return [int.from_bytes(e[1:3], "little") * 10 + int.from_bytes(e[3:5], "little") // 100 for e in entries]
     if name == "camcap_video_format":
         entries = _entries(table, 3)
         return [(e[0], e[1]) for e in entries] if entries is not None else None

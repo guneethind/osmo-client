@@ -13,10 +13,12 @@ from camlink import ble, camera as cam, media
 from camlink.datalink import Datalink
 from camlink.duml import Message
 from camlink.models import MODELS, TESTED_MODELS
+from camlink.protocol import CAMERA_HOST
 from camlink.registry import CameraRegistry
-from camlink.util import log
+from camlink.util import data_dir, log
 
 from .downloads import Downloader, default_download_dir
+from .library import MediaCache
 from .state import CameraState
 
 
@@ -38,11 +40,13 @@ class App:
         self.last_frame = 0.0
         self.frame_cond = threading.Condition()
         self.datalink: Datalink | None = None  # current session, for sending commands
+        self.camera_host = CAMERA_HOST         # its own access point, or its address on a shared network
         self._command_lock = threading.Lock()  # one command at a time: a mode switch takes ~0.8 s
         self._pending: list[Pending] = []
         self._pending_lock = threading.Lock()
         self.settings_due = threading.Event()  # read the settings back now (after a mode switch)
         self.video_grace = 0.0                 # monotonic() until which a pause in the video is expected
+        self.recovery: str | None = None       # what the live view watchdog is doing (for the page)
         # Media library. Listing runs in the camera's media mode (no live view meanwhile).
         self.media = {"state": "idle", "error": None, "updated": None, "stores": {}, "files": []}
         self._media_lock = threading.Lock()
@@ -50,6 +54,9 @@ class App:
         self._media_cond = threading.Condition()
         self._media_counter = 1
         self._thumbs: collections.OrderedDict[str, bytes] = collections.OrderedDict()
+        self.cache = MediaCache(data_dir() / "media")    # last listing and thumbnails, per camera
+        self.allow_delete = False              # --allow-delete: deleting files on the camera is offered
+        self._media_action = 0                 # counter carried by favourite / delete requests
         self.downloader = Downloader(default_download_dir())
         # While the gallery is open the camera stays in media mode: no live view to encode, so it runs
         # cooler and serves files about 6x faster. The page renews the hold; it lapses 30 s after the
@@ -57,6 +64,7 @@ class App:
         self.media_hold = False
         self.media_hold_seen = 0.0
         self.want_link = threading.Event()     # the UI's connect / disconnect switch
+        self.reconnect = threading.Event()     # restart the session (the camera's Wi-Fi setting changed)
         self.want_link.set()
         self.link = "connecting"               # select | off | connecting | on
         self.home = ""                         # Wi-Fi network the computer returns to when disconnected
@@ -99,12 +107,14 @@ class App:
             self.state.update_status(m.payload)
         elif m.command == (0x0D, 0x02):
             self.state.update_battery(m.payload)
+        elif m.command == (0x02, 0xDC):
+            self.state.update_stores(m.payload)
         elif m.command == (0x00, 0x99):
             self.state.update_topic(m.payload)
 
     # ---- commands ------------------------------------------------------------------------------
     def request(self, cmd_set: int, cmd_id: int, payload: bytes = b"", timeout: float = 2.5,
-                quiet: bool = False) -> dict:
+                quiet: bool = False, receiver: int | None = None) -> dict:
         """Send a command and wait for the camera's reply (matched by sequence). Result code 00 = OK."""
         link = self.datalink
         if link is None:
@@ -116,7 +126,7 @@ class App:
             with self._pending_lock:
                 self._pending.append(pending)
             try:
-                pending.seq = link.send(cmd_set, cmd_id, payload)
+                pending.seq = link.send(cmd_set, cmd_id, payload, receiver)
             except OSError:              # the session closed its socket meanwhile (disconnect / restart)
                 return {"ok": False, "error": "not connected to the camera"}
             answered = pending.done.wait(timeout)
@@ -143,8 +153,18 @@ class App:
         answers = [self.request(0x02, cmd_id, timeout=1.5, quiet=True)
                    for cmd_id in (0x1F, 0x2B, 0x29, 0x19, 0x13, 0x2D)]
         settings = cam.parse_settings(*(bytes.fromhex(a.get("reply", "")) for a in answers))
-        if settings is not None:
-            self.state.update_settings(settings)
+        if settings is None:
+            return
+        # Field of view and stabilisation (02/8E parameters), when the current capture mode offers them.
+        _, caps = self.state.capabilities()
+        old = self.state.settings or {}
+        for key, table, param in (("fov", "camcap_fov", cam.PARAM_FOV), ("eis", "camcap_eis", cam.PARAM_EIS)):
+            settings[key] = None
+            if caps.get(table):
+                answer = self.request(0x02, 0x8E, cam.parameter_tlv_get(param), timeout=1.5, quiet=True)
+                value = cam.parameter_value(bytes.fromhex(answer.get("reply", "")), param)
+                settings[key] = value if value is not None else old.get(key)
+        self.state.update_settings(settings)
 
     def settings_loop(self, stop: threading.Event) -> None:
         """Keep the settings current: changes made on the camera itself, and each capture mode's own
@@ -173,9 +193,27 @@ class App:
         return self.request(0x02, cmd_id, b"\x01" if start else b"\x00")
 
     def set_setting(self, cmd_id: int, payload: bytes) -> dict:
+        # a setting change can pause the camera's encoder for a moment: don't treat it as a stall
+        self.video_grace = max(self.video_grace, time.monotonic() + 4)
         result = self.request(0x02, cmd_id, payload)
         self.read_settings()
         return result
+
+    def set_parameter(self, param: int, value: int) -> dict:
+        """A one-byte 02/8E parameter (field of view, stabilisation). Can restart the video encoder."""
+        self.video_grace = time.monotonic() + 8
+        return self.set_setting(0x8E, cam.parameter_tlv_set(param, value))
+
+    def set_timelapse(self, interval: int | None, duration: int | None) -> dict:
+        """Interval (tenths of a second) and/or duration (seconds); the other one and what the timelapse
+        keeps besides the video stay as they are."""
+        lapse = self.state.lapse() or {}
+        interval = interval if interval is not None else lapse.get("interval") or 20
+        duration = duration if duration is not None else lapse.get("duration", 0)
+        return self.request(0x02, cam.LAPSE_SET, cam.timelapse_payload(lapse.get("save", 0), interval, duration))
+
+    def set_hyperlapse(self, ratio: int) -> dict:
+        return self.request(0x02, cam.LAPSE_SET, cam.hyperlapse_payload(ratio))
 
     def set_frame_rate(self, code: int) -> dict:
         """Keep the current resolution, change the frame rate."""
@@ -277,7 +315,8 @@ class App:
             result = sorted(files.values(), key=lambda f: (media.capture_time(f["name"]) or "", f["name"]), reverse=True)
             for f in result:
                 f["stamp"] = media.capture_time(f["name"]) or f["date"]
-            self.media.update(state="idle", files=result, stores=stores, updated=time.time())
+            self.media.update(state="idle", files=result, stores=stores, updated=time.time(), cached=False)
+            self._save_media()
             log(f"Media library: {len(result)} files (" + ", ".join(f"{k}: {v}" for k, v in stores.items()) + ")")
             return {"ok": True, "count": len(result), "stores": stores}
         except Exception as error:  # noqa: BLE001 - shown on the page
@@ -335,20 +374,76 @@ class App:
 
     def media_snapshot(self) -> dict:
         dl = self.downloader
-        files = [dict(f, downloaded=dl.is_downloaded(f["name"], f["size"])) for f in self.media["files"]]
+        files = [dict(f, downloaded=dl.is_downloaded(f["name"], f["size"]),
+                      res=cam.RESOLUTIONS.get(f.get("res_code"))) for f in self.media["files"]]
         return {"state": self.media["state"], "error": self.media["error"], "updated": self.media["updated"],
-                "stores": self.media["stores"], "files": files, "folder": str(dl.folder)}
+                "stores": self.media["stores"], "files": files, "folder": str(dl.folder),
+                "cached": bool(self.media.get("cached")), "can_delete": self.allow_delete}
+
+    def _save_media(self) -> None:
+        if self.state_camera:
+            self.cache.save(self.state_camera, self.media["updated"], self.media["stores"], self.media["files"])
+
+    def _find(self, storage: int, path: str) -> dict | None:
+        return next((f for f in self.media["files"] if f["storage"] == storage and f["path"] == path), None)
+
+    def set_favourite(self, storage: int, path: str, on: bool) -> dict:
+        """The camera's own favourite mark (the Osmo Nano keeps it with the file)."""
+        if self.media.get("cached"):
+            return {"ok": False, "error": "refresh the gallery first (the list is from last time)"}
+        f = self._find(storage, path)
+        if f is None:
+            return {"ok": False, "error": "file not in the list (refresh the gallery)"}
+        self._media_action += 1
+        result = self.request(0x02, 0xBF, media.favourite_payload(f["handle"], self._media_action, on))
+        if result.get("ok"):
+            f["starred"] = on
+            self._save_media()
+        return result
+
+    def delete_files(self, items: list[tuple[int, str]]) -> dict:
+        """Delete files on the camera, one at a time; each request is sent once (never repeated). Only
+        offered with --allow-delete."""
+        if not self.allow_delete:
+            return {"ok": False, "error": "deleting is off (start the app with --allow-delete)"}
+        if self.datalink is None:
+            return {"ok": False, "error": "not connected to the camera"}
+        if self.media.get("cached"):         # file handles from last time may point at other files now
+            return {"ok": False, "error": "refresh the gallery first (the list is from last time)"}
+        deleted, failed = [], []
+        for storage, path in items:
+            f = self._find(storage, path)
+            if f is None:
+                failed.append(path)
+                continue
+            self._media_action += 1
+            result = self.request(0x00, 0x28, media.delete_payload(f["handle"], self._media_action), timeout=6)
+            if result.get("ok"):
+                deleted.append(path)
+                self.media["files"] = [x for x in self.media["files"] if x is not f]
+                log(f"Deleted on the camera: {f['name']}")
+            else:
+                failed.append(path)
+                log(f"Not deleted: {f['name']} ({result.get('error')})")
+        self._save_media()
+        if failed:
+            return {"ok": False, "deleted": len(deleted), "error": f"{len(failed)} not deleted (refresh to check)"}
+        return {"ok": True, "deleted": len(deleted)}
 
     def thumbnail(self, storage: int, path: str) -> bytes | None:
         key = f"{storage}:{path}"
         if key in self._thumbs:
             self._thumbs.move_to_end(key)
             return self._thumbs[key]
-        try:
-            with urllib.request.urlopen(media.http_url(storage, path), timeout=6) as response:
-                data = response.read()
-        except (urllib.error.URLError, OSError):
-            return None
+        data = self.cache.thumb(self.state_camera, key) if self.state_camera else None
+        if data is None:
+            try:
+                with urllib.request.urlopen(media.http_url(storage, path, self.camera_host), timeout=6) as response:
+                    data = response.read()
+            except (urllib.error.URLError, OSError):
+                return None
+            if self.state_camera:
+                self.cache.put_thumb(self.state_camera, key, data)
         self._thumbs[key] = data
         while len(self._thumbs) > 2000:
             self._thumbs.popitem(last=False)
@@ -359,6 +454,7 @@ class App:
         snap = self.state.snapshot()
         snap["video_age"] = round(time.monotonic() - self.last_frame, 1) if self.last_frame else None
         snap["link"] = self.link
+        snap["recovery"] = self.recovery
         snap["home"] = self.home
         snap["media_state"] = self.media["state"]
         snap["downloads_active"] = self.downloader.active()
@@ -386,7 +482,13 @@ class App:
             if self.state_camera is not None:
                 self.downloader.cancel_all()
             self.state = CameraState()
+            with self.frame_cond:            # the last picture belongs to the previous camera
+                self.latest_frame, self.last_frame = None, 0.0
             self.media = {"state": "idle", "error": None, "updated": None, "stores": {}, "files": []}
+            cached = self.cache.load(address)
+            if cached:                            # what the camera had last time, until it is read again
+                self.media.update(updated=cached.get("updated"), stores=cached.get("stores") or {},
+                                  files=cached["files"], cached=True)
             self._thumbs.clear()
             self.media_hold = False
             self.state_camera = address
@@ -438,9 +540,26 @@ class App:
         self.want_link.set()
         return {"ok": True}
 
+    def set_network(self, address: str, ssid: str | None, password: str | None) -> dict:
+        """Reach this camera over the shared network `ssid` (the camera joins it), or over its own access
+        point (None). Applies at once to the active camera."""
+        address = address.upper()
+        if self.registry.get(address) is None:
+            return {"ok": False, "error": "unknown camera"}
+        if ssid:
+            if len(ssid.encode()) > 32 or (password is not None and len(password.encode()) > 63):
+                return {"ok": False, "error": "network name up to 32 characters, password up to 63"}
+            if password is None and self.registry.network_password(ssid) is None:
+                return {"ok": False, "error": f"type the password of “{ssid}”"}
+        self.registry.set_network(address, ssid, password)
+        if address == self.target:
+            self.reconnect.set()
+        return {"ok": True}
+
     def forget(self, address: str) -> None:
         address = address.upper()
         self.registry.forget(address)
+        self.cache.forget(address)
         if self.target == address:
             self.target = None
             self.target_changed.set()
@@ -468,4 +587,5 @@ class App:
                   if a not in known_ids and (now - n["t"] <= 20 or a == self.target)]
         return {"target": self.target, "known": known, "nearby": nearby, "scanning": self.scanning,
                 "stage": self.stage, "stage_error": self.stage_error, "link": self.link,
+                "networks": self.registry.network_names(), "home": self.home,
                 "tested_models": [MODELS[m] for m in sorted(TESTED_MODELS)]}

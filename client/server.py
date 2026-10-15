@@ -7,11 +7,12 @@ import contextlib
 import io
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from camlink import camera as cam, media
 from camlink.util import log
@@ -20,6 +21,7 @@ from .app import App
 from .downloads import open_folder
 
 PAGE_FILE = Path(__file__).resolve().parent / "web" / "index.html"
+WEB_FILES = {"/monitor.js": ("monitor.js", "text/javascript; charset=utf-8")}   # other files the page loads
 CONTENT_TYPES = {"LRF": "video/mp4", "MP4": "video/mp4", "THM": "image/jpeg", "JPG": "image/jpeg"}
 
 
@@ -30,6 +32,19 @@ def _builtin_formats(mode: int | None) -> list[tuple[int, int]]:
     if not formats:
         return []
     return [(r, f) for r in formats["res"] for f in cam.LIMITED_FPS.get(r, formats["fps"])]
+
+
+def interval_label(tenths: int) -> str:
+    seconds = tenths / 10
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return f"{seconds // 3600:g} h"
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds // 60:g} min"
+    return f"{seconds:g} s"
+
+
+def duration_label(seconds: int) -> str:
+    return "Until stopped" if not seconds else interval_label(seconds * 10)
 
 
 def exposure_options(app: App) -> dict:
@@ -70,7 +85,37 @@ def exposure_options(app: App) -> dict:
         "slowmo": slowmo,
         "photo_formats": [{"size": s, "ratio": r, "label": cam.photo_label(s, r)} for s, r in photo],
         "wb_kelvin": list(range(low, high + 1, 100)),
+        # Exposure compensation is a classic command: offered whenever the camera publishes its exposure.
+        "ev": [{"thirds": t, "label": cam.ev_label(t)} for t in cam.EV_THIRDS],
+        # Image and lapse settings: only what the camera lists for the current capture mode.
+        "color_modes": [{"code": c, "label": cam.color_label(c)} for c in caps.get("camcap_color_mode") or []],
+        "fov": [{"code": c, "label": cam.fov_label(c)} for c in caps.get("camcap_fov") or []],
+        "eis": [{"code": c, "label": cam.eis_label(c)} for c in caps.get("camcap_eis") or []],
+        "sharpness": caps.get("camcap_sharpness") or [],
+        "denoise": caps.get("camcap_denoise") or [],
+        "intervals": [{"tenths": t, "label": interval_label(t)} for t in caps.get("camcap_photo_timer_interval") or []]
+        if mode == cam.MODE_TIMELAPSE else [],
+        "durations": [{"seconds": d, "label": duration_label(d)} for d in caps.get("camcap_timelapse_duration") or []]
+        if mode == cam.MODE_TIMELAPSE else [],
+        "hyperlapse": [{"ratio": r, "label": f"{r}×" if r else "Auto"} for r in caps.get("camcap_hyperlapse_ratio") or []]
+        if mode == cam.MODE_HYPERLAPSE else [],
     }
+
+
+def _jpeg(source) -> bytes | None:
+    """The latest frame of `source` (the app) as JPEG, encoded once per frame however many pages and
+    readers ask for it."""
+    with source.frame_cond:
+        frame, seq = source.latest_frame, source.frame_seq
+    cached = getattr(source, "jpeg_cache", None)
+    if cached and cached[0] == seq:
+        return cached[1]
+    if frame is None:
+        return None
+    buffer = io.BytesIO()
+    frame.to_image().save(buffer, "JPEG", quality=80)
+    source.jpeg_cache = (seq, buffer.getvalue())
+    return source.jpeg_cache[1]
 
 
 def start_server(app: App, port: int) -> ThreadingHTTPServer:
@@ -107,7 +152,8 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             """Relay a camera file (Range passes through, so the <video> preview can seek)."""
             headers = {"Range": self.headers["Range"]} if self.headers.get("Range") else {}
             try:
-                upstream = urllib.request.urlopen(urllib.request.Request(media.http_url(storage, path), headers=headers),
+                upstream = urllib.request.urlopen(urllib.request.Request(media.http_url(storage, path, app.camera_host),
+                                                                         headers=headers),
                                                   timeout=10)
             except urllib.error.HTTPError as error:
                 self.send_error(error.code)
@@ -139,12 +185,10 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             while True:
                 with app.frame_cond:
                     app.frame_cond.wait_for(lambda: app.frame_seq != last, timeout=2)
-                    frame, last = app.latest_frame, app.frame_seq
-                if frame is None:
+                    last = app.frame_seq
+                jpeg = _jpeg(app)
+                if jpeg is None:
                     continue
-                buffer = io.BytesIO()
-                frame.to_image().save(buffer, "JPEG", quality=80)
-                jpeg = buffer.getvalue()
                 try:
                     self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n"
                                      % len(jpeg) + jpeg + b"\r\n")
@@ -232,6 +276,52 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._bad(f"colour temperature out of range ({kelvins[0]}-{kelvins[-1]} K)")
                 else:
                     self._json(app.set_white_balance(manual, kelvin))
+            elif path.startswith("/api/ev/"):
+                thirds = self._tail_int()
+                if thirds not in cam.EV_THIRDS:
+                    self._bad("exposure compensation is -9 to +9 thirds of a stop")
+                else:
+                    self._json(app.set_setting(0x2E, bytes((cam.EV_ZERO + thirds,))))
+            elif path == "/api/image":
+                try:
+                    body = self._body()
+                    name, value = str(body["name"]), int(body["value"])
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {name, value}")
+                    return
+                options = exposure_options(app)
+                offered = {"color": [o["code"] for o in options["color_modes"]], "fov": [o["code"] for o in options["fov"]],
+                           "eis": [o["code"] for o in options["eis"]], "sharpness": options["sharpness"],
+                           "denoise": options["denoise"]}.get(name)
+                if offered is None or value not in offered:
+                    self._bad(f"{name} {value} is not offered in this capture mode")
+                elif name == "color":
+                    app.video_grace = time.monotonic() + 8
+                    self._json(app.request(0x02, 0x42, bytes((value,))))
+                elif name in ("fov", "eis"):
+                    self._json(app.set_parameter(cam.PARAM_FOV if name == "fov" else cam.PARAM_EIS, value))
+                else:
+                    cmd_id = cam.SHARPNESS_SET if name == "sharpness" else cam.DENOISE_SET
+                    self._json(app.request(0x02, cmd_id, bytes((value & 0xFF,))))
+            elif path == "/api/lapse":
+                try:
+                    body = self._body()
+                    values = {k: int(body[k]) for k in ("interval", "duration", "ratio") if body.get(k) is not None}
+                except (ValueError, TypeError):
+                    self._bad("expected {interval} / {duration} / {ratio}")
+                    return
+                options = exposure_options(app)
+                if "ratio" in values:
+                    if values["ratio"] not in [o["ratio"] for o in options["hyperlapse"]]:
+                        self._bad("hyperlapse speed not offered (switch to Hyperlapse first)")
+                    else:
+                        self._json(app.set_hyperlapse(values["ratio"]))
+                elif ("interval" in values and values["interval"] not in [o["tenths"] for o in options["intervals"]]) or                         ("duration" in values and values["duration"] not in [o["seconds"] for o in options["durations"]]):
+                    self._bad("timelapse setting not offered (switch to Timelapse first)")
+                elif values:
+                    self._json(app.set_timelapse(values.get("interval"), values.get("duration")))
+                else:
+                    self._bad("nothing to set")
             elif path in ("/api/cameras/connect", "/api/cameras/forget"):
                 try:
                     address = str(self._body()["address"])
@@ -243,6 +333,16 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 else:
                     app.forget(address)
                     self._json({"ok": True})
+            elif path == "/api/cameras/network":
+                try:
+                    body = self._body()
+                    address = str(body["address"])
+                    ssid = str(body["ssid"]).strip() if body.get("ssid") else None
+                    password = str(body["password"]) if body.get("password") is not None else None
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {address, ssid, password}")
+                    return
+                self._json(app.set_network(address, ssid, password))
             elif path == "/api/cameras/scan":
                 if app.loop is not None and app.link == "on":
                     asyncio.run_coroutine_threadsafe(app.quick_scan(), app.loop)
@@ -260,6 +360,20 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._bad("expected {items: [{storage, path, name, size}]}")
                     return
                 self._json({"ok": True, "queued": len(added)})
+            elif path in ("/api/media/favourite", "/api/media/delete"):
+                try:
+                    body = self._body()
+                    if path.endswith("favourite"):
+                        storage, file_path, on = int(body["storage"]), str(body["path"]), bool(body["on"])
+                    else:
+                        items = [(int(i["storage"]), str(i["path"])) for i in body["items"]]
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {storage, path, on} / {items: [{storage, path}]}")
+                    return
+                if path.endswith("favourite"):
+                    self._json(app.set_favourite(storage, file_path, on))
+                else:
+                    self._json(app.delete_files(items))
             elif path.startswith("/api/media/cancel/"):
                 app.downloader.cancel(self._tail_int() or 0)
                 self._json({"ok": True})
@@ -281,10 +395,12 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
         # ---- GET: page, state, files, live view
         def do_GET(self) -> None:
             path = self.path
-            if path == "/":
-                body = PAGE_FILE.read_bytes()
+            if path == "/" or path in WEB_FILES:
+                name, ctype = WEB_FILES.get(path, ("index.html", "text/html; charset=utf-8"))
+                body = (PAGE_FILE.parent / name).read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "no-cache")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -318,6 +434,17 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 self._relay(storage, file_path, filename=file_path.rsplit("/", 1)[-1])
             elif path.startswith("/stream"):
                 self._stream()
+            elif path.startswith("/frame.jpg"):
+                jpeg = _jpeg(app)
+                if jpeg is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(jpeg)))
+                self.end_headers()
+                self.wfile.write(jpeg)
             else:
                 self.send_error(404)
 

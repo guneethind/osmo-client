@@ -8,33 +8,59 @@ exposure and format settings, camera status, and a gallery to preview and downlo
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
-> **New in 1.1: macOS and Linux.** macOS is tested end to end with the Osmo Nano (linking, live view,
-> settings, gallery and downloads); Linux is still being tested on real hardware. Reports are welcome.
+> **New in 1.3: a field monitor.** Scopes, false color, zebras, focus peaking, frame guides and a display
+> LUT over the live view; exposure compensation and the camera's light meter; color profile (D-Log M),
+> field of view and stabilization; timelapse and hyperlapse settings; gallery favorites; a steadier live
+> view. Experimental: the camera can join your Wi-Fi network instead of the computer joining the camera's.
+>
+> Since 1.1: macOS and Linux. macOS is tested end to end with the Osmo Nano; Linux is still being tested on
+> real hardware. Reports are welcome.
 
 ![Osmo Client: live view, shutter, capture modes and camera settings](screenshots/main-app.png)
 
 ## Features
 
-- **Live view** of the camera.
+- **Live view** of the camera, full screen if you like (double-click it). If the picture stalls, the app
+  asks the camera for a fresh one and, if that is not enough, restarts the link, keeping the last picture
+  on screen (marked NO VIDEO) meanwhile.
+- **Monitoring tools** over the live view, as on a field monitor: histogram, waveform, RGB parade and
+  vectorscope; false color, zebras (white or black-and-white stripes) and focus peaking; grids, frame
+  guides (2.39:1, 1.85:1, 9:16…) and a center cross; a display LUT (`.cube`) applied only while the camera
+  records in a log profile, or always; save a still of the picture as shown. Keys: `H` `W` `R` `V` `F` `Z`
+  `P` `G` `L`. They work on the picture shown on the computer; nothing changes on the camera or in the
+  recording. The LUT is for viewing only: the camera still records its log profile (D-Log M on the Osmo
+  Nano) and you apply the LUT, or your own grade, when editing. Get the official LUTs from
+  [DJI's LUT downloads](https://www.dji.com/lut).
 - **Capture modes**: Photo, Video, Super Night, Slow-mo, Timelapse, Hyperlapse (keys `1`–`6`).
 - **Shutter**: takes a photo, starts/stops recording or a timelapse, depending on the mode (`Space`).
 - **Exposure**: Auto / Manual, ISO (Nano: up to 12800 in Video, 25600 in the other modes), shutter speed
-  (1/8000 s–30 s), white balance (Auto or 2000–10000 K). Each capture mode keeps its own exposure, as on
-  the camera.
+  (1/8000 s–30 s), white balance (Auto or 2000–10000 K), exposure compensation (±3 EV in Auto), and the
+  camera's own light meter. Each capture mode keeps its own exposure, as on the camera.
+- **Image**: color profile (Normal, 10-bit, D-Log M), field of view, stabilization, sharpness and noise
+  reduction, as the camera offers them in each capture mode.
 - **Format**: video resolution (4K, 2.7K, 1080p in 16:9 or 4:3) and frame rate (24–60 fps), slow motion
-  (120 fps 4×, 240 fps 8×), photo size and ratio (L 36/31 MP, M 9/8 MP).
+  (120 fps 4×, 240 fps 8×), photo size and ratio (L 36/31 MP, M 9/8 MP), timelapse interval
+  (0.5 s–1 h) and duration, hyperlapse speed.
 - **Only what the camera offers**: the camera publishes what each capture mode supports (modes,
   resolutions and frame rates, ISO, shutter speeds, photo sizes), and the app offers exactly that. Until
   that arrives it uses the Osmo Nano's lists.
-- **Status**: recording state and time, storage free and remaining (video time / photos), estimated
-  quality and bitrate, battery (%, voltage, temperature, charging), ISO and shutter in use (also in
+- **Status**: recording state and time, storage free and remaining (video time / photos; internal memory
+  and microSD separately), estimated quality and bitrate, battery (%, voltage, temperature, charging), ISO and shutter in use (also in
   Auto).
-- **Gallery**: browse the camera's files by day, filter videos/photos, preview (low-resolution video
-  proxy or the photo), and **download to the computer over Wi-Fi** (queue, progress, resumes if
-  interrupted) into `DJI Osmo/<camera>` in your Videos folder (Movies on macOS). Nothing is ever
-  deleted from the camera.
+- **Gallery**: browse the camera's files by day, filter videos/photos/favorites, preview (low-resolution
+  video proxy or the photo, with resolution and frame rate), mark favorites (the camera keeps the mark),
+  watch a 48–60 fps clip slowed down to 24/25/30 fps, and **download to the computer over Wi-Fi** (queue,
+  progress, resumes if interrupted) into `DJI Osmo/<camera>` in your Videos folder (Movies on macOS). The
+  list and thumbnails are kept on the computer, so the gallery opens at once, also with the camera off.
+  Nothing is deleted from the camera unless you start the app with `--allow-delete` (experimental), which
+  adds a Delete button that asks first.
 - **Several cameras**: link more than one; one is active at a time. Shows whether the camera is
   asleep or on while disconnected.
+- **Shared Wi-Fi (experimental)**: instead of the computer joining the camera's Wi-Fi, the camera can join
+  a network the computer is on (your router, or the computer's hotspot), so the computer keeps its
+  internet without a second adapter. Set it per camera under Cameras → Wi-Fi → Change. Networks must allow
+  WPA2 (the Osmo Nano refuses WPA3-only ones); guest networks that keep devices apart don't work. When you
+  disconnect, the camera goes back to its own Wi-Fi.
 - **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
   computer back on its own Wi-Fi without closing the app.
 
@@ -156,6 +182,7 @@ The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on m
 --home NETWORK            Wi-Fi network to go back to on Windows and Linux (default: the one the computer is on)
 --port 8091               port of the local page
 --no-browser              don't open the page automatically
+--allow-delete            offer to delete files on the camera from the gallery (experimental)
 --help                    everything else
 ```
 
@@ -222,13 +249,15 @@ Code layout:
 
 Everything stays on your computer. The app talks only to the camera and serves its page on
 `127.0.0.1` (not reachable from the network). The cameras you link (Bluetooth address, name, and the
-camera's Wi-Fi password) are stored in `cameras.json`, shared with OsmoCam:
+camera's Wi-Fi password), and the name and password of a shared network you choose for them, are stored in
+`cameras.json`, shared with OsmoCam:
 
 - Windows: `%LOCALAPPDATA%\osmo-pc\cameras.json`
 - macOS: `~/Library/Application Support/osmo-pc/cameras.json`
 - Linux: `~/.local/share/osmo-pc/cameras.json`
 
-The same folder holds the app's private Python environment. Downloads go to the folder you choose. No
+The same folder holds the app's private Python environment and, under `media`, each camera's last file
+list and thumbnails (so the gallery opens at once). Downloads go to the folder you choose. No
 telemetry.
 
 ## Legal

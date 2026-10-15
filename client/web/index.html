@@ -77,6 +77,41 @@
   .spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--border-2); border-top-color: var(--accent);
              animation: spin .9s linear infinite; margin: 0 auto; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .stall { position: absolute; left: 50%; top: 48px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+           max-width: calc(100% - 24px); overflow: hidden;
+           padding: 5px 12px; border-radius: 999px; background: rgba(40, 10, 10, .82); border: 1px solid #6b2a27;
+           color: #ffb4ab; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .stall b { color: #fff; letter-spacing: .06em; }
+  .viewer.stalled > img { filter: grayscale(.7) brightness(.55); transition: filter .3s; }
+  .viewer:fullscreen { aspect-ratio: auto; width: 100vw; height: 100vh; border-radius: 0; border: 0; }
+  /* monitoring tools (monitor.js) */
+  .mon-layer { position: absolute; pointer-events: none; }
+  .mon-scopes { position: absolute; left: 10px; bottom: 10px; right: 10px; display: flex; flex-wrap: wrap-reverse; gap: 8px;
+                align-items: flex-end; pointer-events: none; }
+  .mon-scope { margin: 0; padding: 6px 6px 4px; border-radius: 8px; background: rgba(8, 10, 13, .74);
+               border: 1px solid rgba(255, 255, 255, .08); }
+  .mon-scope canvas { display: block; width: clamp(150px, 20cqw, 256px); height: auto; }
+  .mon-scope[data-scope=vectorscope] canvas { width: clamp(110px, 12cqw, 150px); }
+  .mon-scope figcaption { margin-top: 3px; font-size: 10px; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
+  .mon-legend { position: absolute; right: 10px; top: 46px; display: grid; gap: 3px; padding: 6px 9px; border-radius: 8px;
+                background: rgba(8, 10, 13, .74); font-size: 11px; pointer-events: none; }
+  .mon-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .mon-legend small { color: var(--faint); margin-left: 3px; font-variant-numeric: tabular-nums; }
+  .assists { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+  .assists button { font: inherit; font-size: 12.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border);
+                    border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+  .assists button:hover:not(:disabled) { color: var(--text); border-color: var(--border-2); }
+  .assists button[aria-pressed=true], .assists button[aria-expanded=true] { color: var(--text); background: var(--border-2); border-color: var(--accent); }
+  .assists button.waiting { border-style: dashed; }
+  .assists button:disabled { opacity: .45; cursor: default; }
+  .assists .sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+  .assists .spacer { flex: 1; }
+  .mon-panel { margin-top: 10px; }
+  .mon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 24px; align-items: start; }
+  .mon-grid input[type=checkbox] { justify-self: start; width: 16px; height: 16px; accent-color: var(--accent); }
+  .mon-lut { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mon-lut-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mon-lut-btns .btn { white-space: nowrap; }
   .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
   .flash.go { animation: flash .45s ease-out; }
   @keyframes flash { 0% { opacity: .85; } 100% { opacity: 0; } }
@@ -140,6 +175,7 @@
   .headline .big { font-size: 24px; font-weight: 650; }
   .headline .small { color: var(--muted); font-size: 12.5px; }
   .note { color: var(--faint); font-size: 12px; margin: 8px 0 0; }
+  .note a { color: var(--accent); }
   .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; margin-bottom: 12px;
          border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
   .seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 8px; border-radius: 7px;
@@ -148,10 +184,21 @@
   .seg button[aria-pressed=true] { background: var(--border-2); color: var(--text); }
   .seg button:disabled { cursor: default; opacity: .5; }
   .field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px; }
-  .field label { color: var(--muted); }
+  .field label { color: var(--muted); min-width: 7.1em; }   /* the same column in every card */
   .field select { width: 100%; font: inherit; font-weight: 550; font-variant-numeric: tabular-nums; color: var(--text);
                   background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 8px; cursor: pointer; }
   .field select:disabled { opacity: .5; cursor: default; }
+  .field input[type=text], .field input[type=password] { width: 100%; font: inherit; color: var(--text); background: var(--surface-2);
+                  border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 8px; }
+  .field + .field { margin-top: 8px; }
+  .meter { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-top: 12px;
+           color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .meter .scale { position: relative; height: 12px; border-radius: 4px; background: var(--surface-2);
+           background-image: repeating-linear-gradient(90deg, var(--border-2) 0 1px, transparent 1px calc(100% / 6)); }
+  .meter .scale::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+  .meter i { position: absolute; top: 2px; bottom: 2px; left: 50%; width: 4px; margin-left: -2px; border-radius: 2px;
+           background: var(--accent); transition: left .3s; }
+  .meter.off i { background: var(--warn); }
   .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 190px; overflow-y: auto; }
   .log li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 13px; }
   .log time { color: var(--faint); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
@@ -204,6 +251,15 @@
   .cam-stage { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
   .cam-stage.err { color: #ff8a80; }
   .cams .empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+  .cam-row .net { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .cam-row .net button { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; }
+  .cam-net { margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
+  .cam-net h4 { margin-top: 0 !important; }
+  .cam-net .choice { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin-bottom: 10px; cursor: pointer; }
+  .cam-net .choice input { margin: 3px 0 0; accent-color: var(--accent); }
+  .cam-net .choice small { grid-column: 2; color: var(--muted); font-size: 12px; }
+  .cam-net .field { margin: 4px 0 4px 24px; }
+  .cam-net .row { display: flex; gap: 8px; margin-top: 10px; }
 
   /* tabs */
   .tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface);
@@ -216,7 +272,7 @@
   /* gallery */
   .gallery { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: 20px; }
   .gal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .gal-bar .seg { margin: 0; grid-template-columns: repeat(3, auto); }
+  .gal-bar .seg { margin: 0; grid-template-columns: repeat(4, auto); }
   .gal-bar .seg button { padding: 5px 12px; }
   .gal-info { color: var(--muted); font-size: 13px; }
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 9px; font-size: 13px;
@@ -244,6 +300,12 @@
                  display: grid; place-items: center; background: rgba(10, 12, 15, .6); border: 1.5px solid rgba(255, 255, 255, .7); }
   .tile.sel .pick { background: var(--accent); border-color: var(--accent); }
   .tile.sel .pick::after { content: "✓"; color: #06121f; font-size: 13px; font-weight: 800; }
+  .icon-btn.star { font-size: 15px; line-height: 1; color: var(--faint); }
+  .icon-btn.star.on { color: var(--warn); }
+  .thumb .fav { position: absolute; top: 6px; right: 8px; color: var(--warn); font-size: 15px; text-shadow: 0 1px 3px #000; }
+  .btn.danger { color: #ff8a80; border-color: #6b2a27; }
+  .lb-bar select { font: inherit; font-size: 13px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-2);
+                   border-radius: 8px; padding: 5px 8px; }
   .thumb .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0, 0, 0, .5); }
   .thumb .prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
   .meta { display: flex; align-items: center; gap: 8px; padding: 7px 9px; font-size: 12.5px; }
@@ -313,6 +375,7 @@
       <img id="view" alt="Camera live view">
       <div class="flash" id="flash"></div>
       <div class="hud left"><span class="tag" id="recTag" hidden></span></div>
+      <div class="stall" id="stall" hidden><b>NO VIDEO</b><span id="stallText">holding the last picture</span></div>
       <div class="hud right">
         <span class="tag muted num" id="expoTag" hidden title="Manual exposure"></span>
         <span class="tag muted" id="modeTag" hidden></span>
@@ -326,6 +389,64 @@
           <button class="veil-btn" id="veilBtn" hidden>Connect</button>
         </div>
       </div>
+    </div>
+
+    <div class="assists" id="assists" role="toolbar" aria-label="Monitoring tools">
+      <button data-tool="histogram" aria-pressed="false" title="Histogram (H)">Histogram</button>
+      <button data-tool="waveform" aria-pressed="false" title="Waveform: brightness of each column of the picture (W)">Waveform</button>
+      <button data-tool="parade" aria-pressed="false" title="RGB parade: red, green and blue waveforms side by side (R)">Parade</button>
+      <button data-tool="vectorscope" aria-pressed="false" title="Vectorscope: hue and saturation (V)">Vectorscope</button>
+      <span class="sep"></span>
+      <button data-tool="falseColor" aria-pressed="false" title="False color: brightness bands painted over the picture (F)">False color</button>
+      <button data-tool="zebras" aria-pressed="false" title="Zebras: stripes over the highlights at or above the chosen level (Z)">Zebras</button>
+      <button data-tool="peaking" aria-pressed="false" title="Focus peaking: outlines what is in focus (P)">Peaking</button>
+      <span class="sep"></span>
+      <button data-tool="guides" aria-pressed="false" title="Grid and frame guides (G)">Guides</button>
+      <button data-tool="lut" aria-pressed="false" title="Display LUT for log profiles (L)">LUT</button>
+      <span class="spacer"></span>
+      <button id="monStill" title="Save the picture as shown (LUT and assists included) as a PNG">Save still</button>
+      <button id="monMore" aria-expanded="false" title="Settings of the monitoring tools">Settings</button>
+      <button id="fullView" title="Full screen (or double-click the picture; Esc leaves)">Full screen</button>
+    </div>
+    <div class="card mon-panel" id="monPanel" hidden>
+      <div class="mon-grid">
+        <div class="field">
+          <label for="mZebra">Zebras at</label>
+          <select id="mZebra"><option value="70">70 %</option><option value="80">80 %</option><option value="90">90 %</option>
+            <option value="95">95 %</option><option value="99">Clipping</option></select>
+          <label for="mZebraStyle">Zebra style</label>
+          <select id="mZebraStyle"><option value="white">White stripes</option><option value="bw">Black and white</option></select>
+          <label for="mPeak">Peaking</label>
+          <select id="mPeak"><option value="low">Low sensitivity</option><option value="medium">Medium sensitivity</option>
+            <option value="high">High sensitivity</option></select>
+          <label for="mPeakColor">Peaking color</label>
+          <select id="mPeakColor"><option value="red">Red</option><option value="white">White</option>
+            <option value="blue">Blue</option><option value="green">Green</option></select>
+        </div>
+        <div class="field">
+          <label for="mGrid">Grid</label>
+          <select id="mGrid"><option value="off">Off</option><option value="thirds">Thirds</option>
+            <option value="phi">Golden ratio</option><option value="diagonals">Thirds + diagonals</option></select>
+          <label for="mFrame">Frame guide</label>
+          <select id="mFrame"><option value="off">Off</option><option value="2.39">2.39:1</option><option value="2.35">2.35:1</option>
+            <option value="1.85">1.85:1</option><option value="16:9">16:9</option><option value="4:3">4:3</option>
+            <option value="1:1">1:1</option><option value="4:5">4:5</option><option value="9:16">9:16</option></select>
+          <label for="mMask">Darken outside</label><input type="checkbox" id="mMask">
+          <label for="mCenter">Center cross</label><input type="checkbox" id="mCenter">
+        </div>
+        <div class="field">
+          <label>LUT</label><span class="mon-lut" id="mLutName">None loaded</span>
+          <label for="mLutMode">Apply</label>
+          <select id="mLutMode"><option value="log">With a log profile only</option><option value="always">Always</option></select>
+          <span></span>
+          <span class="mon-lut-btns"><button class="btn" id="mLutLoad">Load .cube…</button><button class="btn" id="mLutClear">Remove</button></span>
+          <input type="file" id="mLutFile" accept=".cube" hidden>
+        </div>
+      </div>
+      <p class="note">The tools read the live view shown here; nothing changes on the camera. Keys: H, W, R, V, F, Z, P, G
+        and L toggle them. The LUT is for viewing only: the camera still records its log profile, and the LUT (or
+        your grade) is applied when editing. Use the one the camera maker publishes for its log profile (D-Log M to
+        Rec.709 for the Osmo Nano): <a href="https://www.dji.com/lut" target="_blank" rel="noopener">DJI's LUT downloads</a>.</p>
     </div>
 
     <div class="deck">
@@ -362,6 +483,10 @@
         <label for="eIso">ISO</label><select id="eIso" disabled><option value="" hidden>—</option></select>
         <label for="eShutter">Shutter</label><select id="eShutter" disabled><option value="" hidden>—</option></select>
         <label for="eWb">White balance</label><select id="eWb" disabled><option value="" hidden>—</option></select>
+        <label for="eEv">EV</label><select id="eEv" disabled><option value="" hidden>—</option></select>
+      </div>
+      <div class="meter" id="eMeter" hidden title="The camera's own light meter: how far the picture is from the exposure it considers correct">
+        <span>−3</span><div class="scale"><i id="eNeedle"></i></div><span>+3</span>
       </div>
       <p class="note" id="eNote">Reading the camera's exposure…</p>
     </div>
@@ -378,7 +503,24 @@
       <div class="field" id="fmtPhoto" hidden>
         <label for="pFmt">Photo</label><select id="pFmt" disabled><option value="" hidden>—</option></select>
       </div>
+      <div class="field" id="fmtLapse" hidden>
+        <label for="lInterval">Interval</label><select id="lInterval" disabled><option value="" hidden>—</option></select>
+        <label for="lDuration">Duration</label><select id="lDuration" disabled><option value="" hidden>—</option></select>
+        <label for="lSpeed">Speed</label><select id="lSpeed" disabled><option value="" hidden>—</option></select>
+      </div>
       <p class="note" id="vNote">Changing the format interrupts the live view for a few seconds.</p>
+    </div>
+
+    <div class="card" id="imgCard" hidden>
+      <h3>Image</h3>
+      <div class="field">
+        <label for="iColor">Color</label><select id="iColor" disabled><option value="" hidden>—</option></select>
+        <label for="iFov">Field of view</label><select id="iFov" disabled><option value="" hidden>—</option></select>
+        <label for="iEis">Stabilization</label><select id="iEis" disabled><option value="" hidden>—</option></select>
+        <label for="iSharp">Sharpness</label><select id="iSharp" disabled><option value="" hidden>—</option></select>
+        <label for="iNr">Noise reduction</label><select id="iNr" disabled><option value="" hidden>—</option></select>
+      </div>
+      <p class="note" id="iNote">What the camera offers in this capture mode.</p>
     </div>
 
     <div class="card">
@@ -388,6 +530,8 @@
       <dl class="rows">
         <dt>Video remaining</dt><dd id="sTime">—</dd>
         <dt>Photos remaining</dt><dd id="sShots">—</dd>
+        <dt id="sIntL" hidden>Internal</dt><dd id="sInt" class="num" hidden>—</dd>
+        <dt id="sSdL" hidden>microSD</dt><dd id="sSd" class="num" hidden>—</dd>
       </dl>
     </div>
 
@@ -423,6 +567,7 @@
       <button data-f="all" aria-pressed="true">All</button>
       <button data-f="video" aria-pressed="false">Videos</button>
       <button data-f="photo" aria-pressed="false">Photos</button>
+      <button data-f="star" aria-pressed="false" title="Files marked as favorite on the camera">★ Favorites</button>
     </div>
     <span class="gal-info num" id="galInfo">—</span>
     <span class="spacer"></span>
@@ -431,6 +576,7 @@
     <button class="btn" id="galSelect">Select new</button>
     <button class="btn primary" id="galDownload" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span id="galDownloadText">Download</span></button>
+    <button class="btn danger" id="galDelete" hidden disabled title="Delete the selected files on the camera">Delete</button>
     <button class="btn" id="galFolder" title="Open the downloads folder">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2h10V19H3z"/></svg>Open folder</button>
   </div>
@@ -448,6 +594,9 @@
     <div class="lb-media" id="lbMedia"></div>
     <div class="lb-bar">
       <div class="info"><b id="lbName"></b><span id="lbInfo"></span></div>
+      <select id="lbSpeed" hidden title="Play a high-frame-rate clip slowed down to a normal frame rate (no sound)"></select>
+      <button class="btn" id="lbStar" title="Mark as favorite on the camera">☆ Favorite</button>
+      <button class="btn danger" id="lbDelete" hidden>Delete</button>
       <button class="btn primary" id="lbDownload">Download</button>
       <button class="btn" id="lbClose">Close</button>
     </div>
@@ -464,6 +613,23 @@
     <div class="cam-stage" id="camStage" hidden></div>
     <h4>Your cameras</h4>
     <div id="camKnown"></div>
+    <div class="cam-net" id="camNet" hidden>
+      <h4 id="netTitle">Wi-Fi</h4>
+      <label class="choice"><input type="radio" name="netMode" value="own">
+        <span>The camera's own Wi-Fi</span>
+        <small>This computer's Wi-Fi joins the camera, so keep internet on Ethernet meanwhile.</small></label>
+      <label class="choice"><input type="radio" name="netMode" value="shared">
+        <span>A network both are on</span>
+        <small>The camera joins your router or this computer's hotspot, and the computer keeps its own connection.</small></label>
+      <div class="field" id="netFields">
+        <label for="netSsid">Network</label><input type="text" id="netSsid" list="netList" autocomplete="off" spellcheck="false">
+        <label for="netPass">Password</label><input type="password" id="netPass" autocomplete="off">
+      </div>
+      <datalist id="netList"></datalist>
+      <p class="note" id="netNote">Networks with WPA2 (or WPA2/WPA3) work; the Osmo Nano refuses networks that only allow
+        WPA3. Guest networks that keep devices apart don't work. The password is kept on this computer only.</p>
+      <div class="row"><button class="btn primary" id="netSave">Save and reconnect</button><button class="btn" id="netCancel">Cancel</button></div>
+    </div>
     <h4>Nearby <span id="camScanning" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)"></span></h4>
     <div id="camNearby"></div>
   </div>
@@ -471,6 +637,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="/monitor.js"></script>
 <script>
 // Number and date formatting. The UI text is English; translations can come later.
 const LOCALE = 'en-US';
@@ -597,7 +764,76 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); shutter(); }
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1]);
+  const tool = TOOL_KEYS[e.key.toLowerCase()];
+  if (tool) toggleTool(tool);
 });
+
+// ---- monitoring tools (monitor.js): scopes, assists, guides and a display LUT over the live view
+const viewer = $('view').parentElement;
+Monitor.init(viewer, $('view'));
+const TOOL_KEYS = { h: 'histogram', w: 'waveform', r: 'parade', v: 'vectorscope', f: 'falseColor', z: 'zebras',
+                    p: 'peaking', g: 'guides', l: 'lut' };
+const GL_TOOLS = ['falseColor', 'zebras', 'peaking', 'lut'];
+function toggleTool(tool) {
+  if (GL_TOOLS.includes(tool) && !Monitor.glReady()) return;
+  if (Monitor.toggle(tool) === 'no-lut') { showMonPanel(true); toast('Load a .cube LUT first (Settings → Load .cube…)'); }
+}
+for (const b of $('assists').querySelectorAll('[data-tool]')) b.onclick = () => toggleTool(b.dataset.tool);
+function showMonPanel(open) {
+  $('monPanel').hidden = !open;
+  $('monMore').setAttribute('aria-expanded', String(open));
+}
+$('monMore').onclick = () => showMonPanel($('monPanel').hidden);
+function toggleFullScreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else viewer.requestFullscreen().catch(() => toast('Full screen is not available here', true));
+}
+$('fullView').onclick = toggleFullScreen;
+$('monStill').onclick = async () => {
+  const url = await Monitor.still();
+  if (!url) { toast('No picture to save yet', true); return; }
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  a.href = url; a.download = `still-${stamp}.png`;
+  a.click();
+  activity(`Still saved (${a.download})`, 'ok');
+};
+viewer.addEventListener('dblclick', toggleFullScreen);
+const MON_SELECTS = { mZebra: ['zebraLevel', Number], mZebraStyle: ['zebraStyle', String], mPeak: ['peakLevel', String], mPeakColor: ['peakColor', String],
+                      mGrid: ['grid', String], mFrame: ['frame', String], mLutMode: ['lutMode', String] };
+for (const [id, [key, type]] of Object.entries(MON_SELECTS)) $(id).onchange = e => Monitor.set(key, type(e.target.value));
+$('mMask').onchange = e => Monitor.set('mask', e.target.checked);
+$('mCenter').onchange = e => Monitor.set('center', e.target.checked);
+$('mLutLoad').onclick = () => $('mLutFile').click();
+$('mLutFile').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const problem = await Monitor.loadLut(file);
+  if (problem && !Monitor.lutName()) toast(`LUT not loaded: ${problem}`, true);
+  else activity(`LUT loaded: ${Monitor.lutName()}` + (problem ? ` (${problem})` : ''), 'ok');
+};
+$('mLutClear').onclick = () => Monitor.clearLut();
+function renderAssists() {
+  const gl = Monitor.glReady();
+  for (const b of $('assists').querySelectorAll('[data-tool]')) {
+    const tool = b.dataset.tool;
+    b.setAttribute('aria-pressed', String(!!Monitor.get(tool)));
+    if (GL_TOOLS.includes(tool) && !gl) { b.disabled = true; b.title = 'Needs WebGL 2, which this browser does not offer'; }
+  }
+  // A LUT that waits for a log profile: on, but not applied to this picture.
+  const lutButton = $('assists').querySelector('[data-tool=lut]');
+  lutButton.classList.toggle('waiting', !!Monitor.get('lut') && !Monitor.lutActive());
+  lutButton.textContent = Monitor.get('lut') && Monitor.lutName() ? `LUT · ${Monitor.lutName()}` : 'LUT';
+  $('mLutName').textContent = Monitor.lutName() || 'None loaded';
+  $('mLutName').title = Monitor.lutName() || '';
+  $('mLutClear').disabled = !Monitor.lutName();
+  for (const [id, [key]] of Object.entries(MON_SELECTS)) if (document.activeElement !== $(id)) $(id).value = String(Monitor.get(key));
+  $('mMask').checked = !!Monitor.get('mask');
+  $('mCenter').checked = !!Monitor.get('center');
+}
+document.addEventListener('monitorchange', renderAssists);
+renderAssists();
 
 // ---- connect / disconnect
 async function setLink(on) {
@@ -696,6 +932,42 @@ $('eShutter').onchange = e => {
   e.target.blur();
   if (o) command('/api/shutter/' + o.raw, `Shutter → ${secs(o.label)}`);
 };
+$('eEv').onchange = e => {
+  const o = OPTS && OPTS.ev.find(o => String(o.thirds) === e.target.value);
+  e.target.blur();
+  if (o) command('/api/ev/' + o.thirds, `EV → ${o.label}`);
+};
+// Image settings: [request name, title]. The options come from the camera's tables for the current mode.
+const IMAGE = { iColor: ['color', 'Color'], iFov: ['fov', 'Field of view'], iEis: ['eis', 'Stabilization'],
+                iSharp: ['sharpness', 'Sharpness'], iNr: ['denoise', 'Noise reduction'] };
+for (const [id, [name, title]] of Object.entries(IMAGE)) $(id).onchange = e => {
+  const sel = e.target, label = sel.options[sel.selectedIndex].textContent;
+  sel.blur();
+  postJSON('/api/image', { name, value: +sel.value }, `${title} → ${label}`);
+};
+$('lInterval').onchange = e => {
+  const o = OPTS && OPTS.intervals.find(o => String(o.tenths) === e.target.value);
+  e.target.blur();
+  if (o) postJSON('/api/lapse', { interval: o.tenths }, `Timelapse interval → ${o.label}`);
+};
+$('lDuration').onchange = e => {
+  const o = OPTS && OPTS.durations.find(o => String(o.seconds) === e.target.value);
+  e.target.blur();
+  if (o) postJSON('/api/lapse', { duration: o.seconds }, `Timelapse duration → ${o.label}`);
+};
+$('lSpeed').onchange = e => {
+  const o = OPTS && OPTS.hyperlapse.find(o => String(o.ratio) === e.target.value);
+  e.target.blur();
+  if (o) postJSON('/api/lapse', { ratio: o.ratio }, `Hyperlapse speed → ${o.label}`);
+};
+const signed = v => v > 0 ? '+' + v : v < 0 ? '−' + -v : '0';
+const evText = t => { const o = OPTS && OPTS.ev.find(o => o.thirds === t); return o ? o.label : signed(t) + '/3'; };
+// Show or hide a select together with its label (they sit side by side in a .field grid).
+function showRow(id, on) {
+  $(id).hidden = !on;
+  const label = document.querySelector(`label[for="${id}"]`);
+  if (label) label.hidden = !on;
+}
 function syncSelect(sel, value, label, disabled) {
   sel.disabled = disabled;
   if (document.activeElement === sel) return;   // don't fight a dropdown the user has open
@@ -722,6 +994,8 @@ const STAGES = {
   credentials: 'Asking for its Wi-Fi details…',
   wifi: 'Joining the camera’s Wi-Fi…',
   datalink: 'Opening the link to the camera…',
+  station: 'Asking the camera to join the network (this takes about 20 s)…',
+  lan: 'Looking for the camera on the network…',
 };
 const POWER = { awake: 'on', asleep: 'asleep', unknown: 'nearby' };
 function openCams() { $('camPanel').hidden = false; pollCams(); }
@@ -774,6 +1048,8 @@ function renderCams() {
       <div class="acts">${connectingTo(c.address) ? busyButtons('Connecting…') : c.connected ? '<span class="tag-mini ok">active</span>'
         : `<button class="btn primary" data-connect="${c.address}">Connect</button>`}
         ${connectingTo(c.address) ? '' : `<button class="btn" data-forget="${c.address}" title="Forget this camera on this computer">Forget</button>`}</div>
+      <div class="net">Wi-Fi: ${c.network ? `“${esc(c.network)}”` + (c.host ? ` at ${esc(c.host)}` : '') : 'the camera’s own'}
+        <button data-net="${c.address}">Change</button></div>
     </div>`).join('') : '<div class="empty">You have not linked a camera yet.</div>');
   setHTML($('camNearby'), CAMS.nearby.length ? CAMS.nearby.map(c => `
     <div class="cam-row">
@@ -786,9 +1062,44 @@ function renderCams() {
   $('camScanning').textContent = CAMS.scanning ? '· searching…' : '';
   $('camScan').disabled = CAMS.scanning || CAMS.link !== 'on';
 }
+// Per camera: reach it over its own access point, or over a network both are on (the camera joins it).
+let netFor = null;
+function openNetwork(address) {
+  const cam = CAMS && CAMS.known.find(k => k.address === address);
+  if (!cam) return;
+  netFor = address;
+  $('netTitle').textContent = `Wi-Fi for ${cam.name || address}`;
+  for (const r of document.getElementsByName('netMode')) r.checked = r.value === (cam.network ? 'shared' : 'own');
+  $('netSsid').value = cam.network || CAMS.networks[0] || CAMS.home || '';
+  $('netPass').value = '';
+  $('netList').innerHTML = [...new Set([...CAMS.networks, CAMS.home].filter(Boolean))].map(n => `<option value="${esc(n)}">`).join('');
+  syncNetwork();
+  $('camNet').hidden = false;
+}
+function syncNetwork() {
+  const shared = document.querySelector('[name=netMode]:checked').value === 'shared';
+  $('netFields').hidden = !shared;
+  const saved = CAMS && CAMS.networks.includes($('netSsid').value.trim());
+  $('netPass').placeholder = saved ? 'saved (type to change)' : '';
+}
+for (const r of document.getElementsByName('netMode')) r.onchange = syncNetwork;
+$('netSsid').oninput = syncNetwork;
+$('netCancel').onclick = () => { $('camNet').hidden = true; netFor = null; };
+$('netSave').onclick = async () => {
+  const shared = document.querySelector('[name=netMode]:checked').value === 'shared';
+  const body = { address: netFor, ssid: shared ? $('netSsid').value.trim() : null };
+  if (shared && $('netPass').value) body.password = $('netPass').value;
+  const r = await (await fetch('/api/cameras/network', { method: 'POST', body: JSON.stringify(body) })).json();
+  if (!r.ok) { toast(r.error, true); return; }
+  $('camNet').hidden = true; netFor = null;
+  activity(shared ? `The camera will join “${body.ssid}”` : 'The camera will use its own Wi-Fi', 'info');
+  pollCams();
+};
 $('camPanel').addEventListener('click', async e => {
   const c = e.target.closest('[data-connect]'), f = e.target.closest('[data-forget]'), x = e.target.closest('[data-cancel]');
-  if (c) {
+  const n = e.target.closest('[data-net]');
+  if (n) openNetwork(n.dataset.net);
+  else if (c) {
     const address = c.dataset.connect;
     const known = CAMS && CAMS.known.some(k => k.address === address);
     camPending = { address, until: Date.now() + 20000 };
@@ -858,8 +1169,14 @@ function render() {
     'The live view comes back when it finishes: without it the camera sends files about 6 times faster and stays cooler.', true];
   else if (s.media_mode) veil = ['Leaving the gallery…', 'The live view comes back in a few seconds.', true];
   else if (s.playback) veil = ['The camera is in playback', 'Go back to the viewfinder on the camera to get the live view back.', false];
-  else if (s.video_age == null || s.video_age > 2) veil = ['Waiting for video…', 'The link is up; the picture will arrive in a moment.', true];
+  else if (s.video_age == null) veil = ['Waiting for video…', 'The link is up; the picture will arrive in a moment.', true];
+  // A stall after the picture came: keep the last picture (dimmed) and say what the app is doing.
+  const stalled = !veil && !!s && s.connected && s.video_age > 2;
+  viewer.classList.toggle('stalled', stalled);
+  $('stall').hidden = !stalled;
+  if (stalled) $('stallText').textContent = (s.recovery || 'waiting for the picture…') + ` · ${Math.round(s.video_age)} s`;
   $('veil').hidden = !veil;
+  Monitor.update(!veil, !!(s && s.image && s.image.log));
   if (veil) { $('veilTitle').textContent = veil[0]; $('veilText').textContent = veil[1]; $('veilSpin').hidden = !veil[2]; }
   $('veilBtn').hidden = !off && !select;
   $('veilBtn').textContent = select ? 'Choose a camera' : cam && cam.power === 'asleep' ? 'Wake up and connect' : 'Connect';
@@ -941,11 +1258,23 @@ function render() {
     manual ? (set.shutter ? secs(set.shutter) : '—') : auto ? 'Auto' : '—', !canExpo || !manual || !OPTS);
   $('eNote').textContent = !set ? (s && s.connected ? "Reading the camera's exposure…" : 'Not connected to the camera.')
     : manual ? `Manual in ${(s.capture_mode_name || 'this mode')}: each capture mode keeps its own exposure.`
-    : 'In Auto the camera picks ISO and shutter. Switch to Manual to set them.';
+    : 'In Auto the camera picks ISO and shutter (EV shifts its target). Switch to Manual to set them.';
   // white balance (works with Auto exposure too)
   syncSelect($('eWb'), set && set.wb === 'auto' ? 'auto' : set && set.wb === 'manual' ? set.wb_kelvin : null,
     set && set.wb ? (set.wb === 'auto' ? 'Auto' : set.wb_kelvin ? nf.format(set.wb_kelvin) + ' K' : set.wb) : '—',
     !ready() || busy || !set || !OPTS);
+  // exposure compensation (Auto only) and the camera's own light meter, from its exposure topic
+  const evNow = ex && ex.ev != null ? ex.ev : null;
+  if (OPTS) fillSelect($('eEv'), OPTS.ev.map(o => [o.thirds, o.label]), 'ev' + OPTS.key);
+  syncSelect($('eEv'), evNow, evNow != null ? evText(evNow) : '—', !canExpo || !auto || !OPTS || evNow == null);
+  $('eEv').title = manual ? 'Exposure compensation works in Auto' : '';
+  const meter = ex && ex.meter != null ? Math.max(-9, Math.min(9, ex.meter)) : null;
+  $('eMeter').hidden = meter == null;
+  if (meter != null) {
+    $('eNeedle').style.left = (50 + meter / 9 * 50) + '%';
+    $('eMeter').classList.toggle('off', Math.abs(meter) >= 3);
+    $('eMeter').title = `Camera light meter: ${evText(meter)} EV from the exposure it considers correct`;
+  }
 
   // format card: what the current capture mode offers
   const mode = s && s.capture_mode, isSlow = mode === 0x00, isPhoto = !!(s && s.photo_mode);
@@ -971,10 +1300,55 @@ function render() {
     syncSelect($('pFmt'), set && set.photo_size_code != null ? set.photo_size_code + ':' + set.photo_ratio_code : null,
       (set && set.photo) || (storage && storage.quality) || '—', fmtLock);
   }
+  // timelapse interval / duration, hyperlapse speed (02/6C), read back from the lapse topic
+  const isLapse = mode === 0x02, isHyper = mode === 0x0A, lapse = s && s.lapse;
+  const rowInterval = !!(OPTS && isLapse && OPTS.intervals.length), rowDuration = !!(OPTS && isLapse && OPTS.durations.length);
+  const rowSpeed = !!(OPTS && isHyper && OPTS.hyperlapse.length);
+  $('fmtLapse').hidden = !(rowInterval || rowDuration || rowSpeed);
+  showRow('lInterval', rowInterval); showRow('lDuration', rowDuration); showRow('lSpeed', rowSpeed);
+  if (rowInterval) {
+    fillSelect($('lInterval'), OPTS.intervals.map(o => [o.tenths, o.label]), 'li' + OPTS.key);
+    syncSelect($('lInterval'), lapse && lapse.interval, lapse && lapse.interval ? lapse.interval / 10 + ' s' : '—', fmtLock);
+  }
+  if (rowDuration) {
+    fillSelect($('lDuration'), OPTS.durations.map(o => [o.seconds, o.label]), 'ld' + OPTS.key);
+    syncSelect($('lDuration'), lapse ? lapse.duration : null, '—', fmtLock);
+  }
+  if (rowSpeed) {
+    fillSelect($('lSpeed'), OPTS.hyperlapse.map(o => [o.ratio, o.label]), 'ls' + OPTS.key);
+    syncSelect($('lSpeed'), lapse ? lapse.ratio : null, '—', fmtLock);
+  }
   $('vNote').textContent = isPhoto ? 'Photo size and aspect ratio.'
     : isSlow ? 'The slow-motion factor follows the frame rate: 120 fps = 4×, 240 fps = 8×.'
+    : isLapse && rowInterval ? 'Time between shots, and how long the timelapse runs before it stops by itself.'
     : hasFormats ? 'Changing the format interrupts the live view for a few seconds.'
     : '—';
+
+  // image card: only the settings the camera offers in this capture mode (a single option is no choice)
+  const img = s && s.image;
+  const imgRows = OPTS ? {
+    iColor: [OPTS.color_modes.map(o => [o.code, o.label]), img && img.color],
+    iFov: [OPTS.fov.map(o => [o.code, o.label]), set && set.fov],
+    iEis: [OPTS.eis.map(o => [o.code, o.label]), set && set.eis],
+    iSharp: [OPTS.sharpness.map(v => [v, signed(v)]), img && img.sharpness],
+    iNr: [OPTS.denoise.map(v => [v, signed(v)]), img && img.denoise],
+  } : {};
+  let anyImage = false;
+  for (const id of Object.keys(IMAGE)) {
+    const [items, value] = imgRows[id] || [[], null];
+    const show = items.length > 1;
+    showRow(id, show);
+    if (!show) continue;
+    anyImage = true;
+    fillSelect($(id), items, id + OPTS.key);
+    const current = items.find(([v]) => v === value);
+    syncSelect($(id), value, current ? current[1] : '—', fmtLock);
+  }
+  $('imgCard').hidden = !anyImage;
+  const logProfile = img && OPTS && OPTS.color_modes.some(o => o.code === img.color && /log/i.test(o.label));
+  $('iNote').textContent = logProfile
+    ? 'Log profile: the picture looks flat until it is graded (or a LUT is applied).'
+    : 'What the camera offers in this capture mode.';
   const expoTag = $('expoTag');
   expoTag.hidden = !(manual && s.fresh);
   if (manual) expoTag.textContent = `M · ISO ${set.iso ? nf.format(set.iso) : '?'}` + (set.shutter ? ` · ${set.shutter}` : '');
@@ -990,6 +1364,12 @@ function render() {
     $('sShots').textContent = storage.shots_left ? nf.format(storage.shots_left) : '—';
     $('storageChip').hidden = false; $('storageChipText').textContent = gb(storage.free_mb);
   } else $('storageChip').hidden = true;
+  const stores = (s && s.stores) || {};
+  for (const [key, id] of [['internal', 'sInt'], ['sd', 'sSd']]) {
+    const st = stores[key];
+    $(id).hidden = $(id + 'L').hidden = !st;
+    if (st) $(id).textContent = `${gb(st.free_mb)} free of ${gb(st.total_mb)}`;
+  }
 
   // battery card + chip
   const bat = s && s.battery;
@@ -1125,7 +1505,7 @@ async function refreshMedia() {
 }
 
 function visibleFiles() {
-  return M ? M.files.filter(f => galFilter === 'all' || f.type === galFilter) : [];
+  return M ? M.files.filter(f => galFilter === 'all' || f.type === galFilter || (galFilter === 'star' && f.starred)) : [];
 }
 function isOnPC(f) {
   return f.downloaded || DL.some(d => d.path === f.path && d.state === 'done');
@@ -1136,12 +1516,14 @@ function renderGallery() {
   const total = M ? M.files.reduce((a, f) => a + f.size, 0) : 0;
   const videos = M ? M.files.filter(f => f.type === 'video').length : 0;
   $('galInfo').textContent = !M ? '—' : listing && !M.files.length ? 'Reading the gallery…'
-    : `${plural(M.files.length, 'file')} · ${plural(videos, 'video')} · ${plural(M.files.length - videos, 'photo')} · ${fmtSize(total)}` + (listing ? ' · reading…' : '');
+    : `${plural(M.files.length, 'file')} · ${plural(videos, 'video')} · ${plural(M.files.length - videos, 'photo')} · ${fmtSize(total)}`
+      + (listing ? ' · reading…' : M.cached ? ' · as of last time (Refresh to read the camera)' : '');
   $('galRefresh').disabled = listing || !(S && S.link === 'on' && S.connected);
   $('galEmpty').hidden = files.length > 0;
   $('galEmpty').textContent = !M || (listing && !M.files.length) ? "Reading the camera's gallery…"
     : M.state === 'error' ? 'Could not read the gallery: ' + M.error
-    : M.updated ? 'No files of this type.' : 'Press “Refresh” to read the gallery.';
+    : M.updated ? (galFilter === 'star' ? 'No favorites. Mark files with ☆ (the mark is kept on the camera).' : 'No files of this type.')
+    : 'Press “Refresh” to read the gallery.';
   for (const b of $('galFilter').children) b.setAttribute('aria-pressed', String(b.dataset.f === galFilter));
   const stamp = (M && M.updated) + '|' + galFilter + '|' + files.length;
   if (stamp !== galBuiltFor) {
@@ -1161,9 +1543,10 @@ function renderGallery() {
         html += `<div class="tile" data-k="${esc(keyOf(f))}"><div class="thumb" data-act="view" title="${esc(f.name)}">${thumb}`
           + (f.type === 'video' ? `<span class="dur num">${fmtDur(f.duration)}</span>` : '')
           + `<span class="badge" hidden>✓ Downloaded</span><span class="pick" data-act="pick" title="Select"></span>`
-          + `<div class="prog" hidden><i></i></div></div>`
+          + `<span class="fav" hidden>★</span><div class="prog" hidden><i></i></div></div>`
           + `<div class="meta"><b class="num">${esc((f.stamp || '').slice(11, 16))}</b><span class="num">${fmtSize(f.size)}</span>`
-          + `<span class="spacer"></span><button class="icon-btn" data-act="dl" title="Download to this computer">${ICON_DL}</button></div></div>`;
+          + `<span class="spacer"></span><button class="icon-btn star" data-act="star">☆</button>`
+          + `<button class="icon-btn" data-act="dl" title="Download to this computer">${ICON_DL}</button></div></div>`;
       }
       html += '</div>';
     }
@@ -1182,11 +1565,20 @@ function updateTiles() {
     const prog = tile.querySelector('.prog');
     prog.hidden = !d;
     if (d) prog.firstElementChild.style.width = (d.size ? 100 * d.done / d.size : 0).toFixed(1) + '%';
+    const star = tile.querySelector('[data-act=star]');
+    star.classList.toggle('on', !!f.starred);
+    star.textContent = f.starred ? '★' : '☆';
+    star.title = f.starred ? 'Favorite on the camera (click to unmark)' : 'Mark as favorite on the camera';
+    tile.querySelector('.fav').hidden = !f.starred;
     const btn = tile.querySelector('[data-act=dl]');
     btn.disabled = !!d;
     btn.title = d ? 'Queued' : onPc ? 'Already on this computer (download again)' : 'Download to this computer';
   }
   const n = selected.size;
+  $('galDelete').hidden = !(M && M.can_delete);
+  $('galDelete').disabled = n === 0 || !(S && S.link === 'on' && S.connected) || !!(M && M.cached);
+  $('galDelete').title = M && M.cached ? 'Refresh the gallery first (the list is from last time)' : 'Delete the selected files on the camera';
+  $('galDelete').textContent = n ? `Delete (${n})` : 'Delete';
   $('galDownload').disabled = n === 0;
   $('galDownloadText').textContent = n ? `Download (${n})` : 'Download';
   const fresh = visibleFiles().filter(f => !isOnPC(f));
@@ -1203,7 +1595,38 @@ $('galBody').addEventListener('click', e => {
     updateTiles();
   } else if (act.dataset.act === 'view') openViewer(f);
   else if (act.dataset.act === 'dl') download([f]);
+  else if (act.dataset.act === 'star') toggleStar(f);
 });
+async function toggleStar(f) {
+  const on = !f.starred;
+  try {
+    const r = await (await fetch('/api/media/favourite', { method: 'POST', body: JSON.stringify({ storage: f.storage, path: f.path, on }) })).json();
+    if (!r.ok) { toast(`Favorite: ${r.error}`, true); return; }
+  } catch (e) { toast('Favorite: the app did not respond', true); return; }
+  f.starred = on;
+  activity((on ? 'Marked as favorite: ' : 'No longer a favorite: ') + f.name, 'ok');
+  renderGallery();
+  if (lbFile === f) lightboxButtons();
+}
+// Deleting is only offered when the app was started with --allow-delete. Each file is deleted once; one
+// that fails stays in the list.
+async function deleteFiles(files) {
+  if (!files.length) return false;
+  const what = files.length === 1 ? files[0].name : `${files.length} files`;
+  if (!confirm(`Delete ${what} from the camera? This cannot be undone.`)) return false;
+  let r;
+  try {
+    r = await (await fetch('/api/media/delete', { method: 'POST', body: JSON.stringify({ items: files.map(f => ({ storage: f.storage, path: f.path })) }) })).json();
+  } catch (e) { toast('Delete: the app did not respond', true); return false; }
+  if (r.deleted) activity(`Deleted on the camera: ${plural(r.deleted, 'file')}`, 'ok');
+  if (!r.ok) toast(`Delete: ${r.error}`, true);
+  await loadMedia();
+  return !!r.deleted;
+}
+$('galDelete').onclick = async () => {
+  const files = [...selected].map(k => byKey.get(k)).filter(Boolean);
+  if (await deleteFiles(files)) { selected.clear(); updateTiles(); }
+};
 for (const b of $('galFilter').children) b.onclick = () => { galFilter = b.dataset.f; renderGallery(); };
 $('galRefresh').onclick = refreshMedia;
 $('galSelect').onclick = () => {
@@ -1282,10 +1705,32 @@ function openViewer(f) {
     media.innerHTML = `<img alt="" src="/api/media/view?s=${f.storage}&p=${encodeURIComponent(f.path)}">`;
   }
   $('lbName').textContent = f.name;
-  $('lbInfo').textContent = [f.stamp, fmtSize(f.size), f.type === 'video' ? fmtDur(f.duration) + ' · low-resolution preview' : null,
+  $('lbInfo').textContent = [f.stamp, fmtSize(f.size), f.res, f.fps ? `${+f.fps.toFixed(2)} fps` : null,
+    f.type === 'video' ? fmtDur(f.duration) + ' · low-resolution preview' : null,
     isOnPC(f) ? 'already on this computer' : null].filter(Boolean).join(' · ');
+  // A clip shot faster than it is meant to be played (48-60 fps) can be watched slowed down to a normal
+  // frame rate, as an editor would conform it.
+  const speed = $('lbSpeed');
+  const targets = f.type === 'video' && f.fps ? [24, 25, 30].filter(t => t < f.fps * 0.99) : [];
+  speed.hidden = !(f.fps >= 47 && targets.length);
+  speed.innerHTML = `<option value="1">Real time</option>` + targets.map(t => `<option value="${t / f.fps}">As ${t} fps · ${Math.round(100 * t / f.fps)} %</option>`).join('');
+  speed.onchange = () => {
+    const video = media.querySelector('video');
+    if (video) { video.playbackRate = +speed.value; video.muted = +speed.value !== 1; }
+  };
+  lightboxButtons();
   $('lightbox').hidden = false;
 }
+function lightboxButtons() {
+  const f = lbFile;
+  if (!f) return;
+  $('lbStar').textContent = f.starred ? '★ Favorite' : '☆ Favorite';
+  $('lbStar').classList.toggle('primary', false);
+  $('lbStar').title = f.starred ? 'Favorite on the camera (click to unmark)' : 'Mark as favorite on the camera';
+  $('lbDelete').hidden = !(M && M.can_delete);
+}
+$('lbStar').onclick = () => { if (lbFile) toggleStar(lbFile); };
+$('lbDelete').onclick = async () => { if (lbFile && await deleteFiles([lbFile])) closeViewer(); };
 function closeViewer() { $('lightbox').hidden = true; $('lbMedia').innerHTML = ''; lbFile = null; }
 $('lbClose').onclick = closeViewer;
 $('lightbox').onclick = e => { if (e.target === $('lightbox')) closeViewer(); };

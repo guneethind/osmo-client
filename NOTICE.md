@@ -40,6 +40,13 @@ endorsed by or sponsored by DJI.
 - **osmo_nano_webcam** by Matis-ard — <https://github.com/Matis-ard/osmo_nano_webcam> — showed how
   the Osmo Nano's live view can be received over Wi-Fi. No code from it is included here.
 
+- **OpenPocketCine** and **OpenCine** by Erik Sutton and contributors —
+  <https://github.com/erik-sutton95/OpenPocketCine> — Apache License 2.0 (Copyright 2026 Erik Sutton and
+  OpenPocketCine contributors). The live view's picture header and private SEI, the exposure
+  compensation, image, timelapse and storage commands, and the monitoring tools' algorithms and constants
+  (false color bands, zebra and focus peaking thresholds, scope layouts, the .cube LUT layout) follow that
+  project's code and documentation. No code from it is included here.
+
 ## Dependencies
 
 Installed with pip from `requirements.txt` the first time the app runs; none of them are included in
