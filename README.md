@@ -20,7 +20,7 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > Since 1.1: macOS and Linux. macOS is tested end to end with the Osmo Nano; Linux is still being tested on
 > real hardware. Reports are welcome.
 
-![Osmo Client: live view, shutter, capture modes and camera settings](screenshots/main-app.png)
+![Osmo Client: live view with scopes, shutter, capture modes and camera settings](screenshots/main-app.webp)
 
 ## Features
 
@@ -82,9 +82,9 @@ Need the camera as a webcam for video calls? See the companion app,
 
 ## Screenshots
 
-**Gallery**: the camera's files by day, ready to download to the computer.
+**Gallery**: the camera's files by day, with favorites, ready to download to the computer.
 
-![Gallery](screenshots/gallery.png)
+![Gallery](screenshots/gallery.webp)
 
 **Preview** of a video (low-resolution proxy) before downloading it.
 
