@@ -67,6 +67,8 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   disconnect, the camera goes back to its own Wi-Fi.
 - **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
   computer back on its own Wi-Fi without closing the app.
+- **Day and night themes**: the sun / moon button in the header switches the page between light and dark.
+  Until you use it, the page follows your system setting. The live view and the media viewer stay dark.
 
 **Osmo Pocket 3, 4 and 4 Pro (experimental):** the live view (H.265 on the Pocket 4 and 4 Pro) and, only
 while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
