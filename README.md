@@ -8,7 +8,7 @@ exposure and format settings, camera status, and a gallery to preview and downlo
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
-> **New in 1.4 (experimental): Osmo Pocket 3, 4 and 4 Pro.** Live view (H.265 on the Pocket 4 and 4 Pro),
+> **New in 1.4 (experimental): Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P),
 > gimbal and zoom controls. Built from another project's notes on these cameras, **not tested with a real
 > Pocket yet**: reports are welcome.
 >
@@ -70,10 +70,10 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 - **Day and night themes**: the sun / moon button in the header switches the page between light and dark.
   Until you use it, the page follows your system setting. The live view and the media viewer stay dark.
 
-**Osmo Pocket 3, 4 and 4 Pro (experimental):** the live view (H.265 on the Pocket 4 and 4 Pro) and, only
+**Osmo Pocket 3, 4 and 4P (experimental):** the live view (H.265 on the Pocket 4 and 4P) and, only
 while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
 to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
-speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4 Pro) or hold − / + (keys `-` `+`). Built
+speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
 from the OpenPocketCine project's notes; not tested with this app yet.
 
 Other DJI Osmo cameras (Action 4/5 Pro/6) use the same protocol and may work, fully or in part; the

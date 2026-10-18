@@ -24,7 +24,7 @@ All of this was verified on an Osmo Nano; the full description is in docs/PROTOC
 The commands from exposure compensation down follow the capability tables an Osmo Nano publishes; they
 were not all exercised on one yet.
 
-Osmo Pocket 3 / 4 / 4 Pro only (OpenPocketCine's notes, not exercised with this app yet):
+Osmo Pocket 3 / 4 / 4P only (OpenPocketCine's notes, not exercised with this app yet):
 
     gimbal (receiver 0x04)  04/4C [FE 08] recenter, [FE 09] turn 180°; modes: 04/4C [02 08] + 04/50 [00 04 01 00]
                             follow, + [.. 01] tilt locked, 04/4C [01 08] FPV, [00 08] direction lock;
@@ -48,7 +48,7 @@ import re
 
 # Capture modes: the value of 02/E1, also byte 57 of the 02/80 status push.
 MODES = {0x05: "Photo", 0x01: "Video", 0x28: "Super Night", 0x00: "Slow-mo", 0x02: "Timelapse", 0x0A: "Hyperlapse",
-         0x17: "Photo"}                  # 0x17: Photo on the Osmo Pocket 4 / 4 Pro
+         0x17: "Photo"}                  # 0x17: Photo on the Osmo Pocket 4 / 4P
 PHOTO_MODES = {0x05, 0x17}
 MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE, MODE_HYPERLAPSE, MODE_SUPER_NIGHT = 0x01, 0x00, 0x02, 0x0A, 0x28
 

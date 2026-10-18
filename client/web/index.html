@@ -854,7 +854,7 @@ async function command(path, label) {
     busy = false; render();
   }
 }
-// The Osmo Pocket 4 / 4 Pro use 0x17 for Photo where the other cameras use 0x05.
+// The Osmo Pocket 4 / 4P use 0x17 for Photo where the other cameras use 0x05.
 const modeCode = m => m.p === 0x05 && OPTS && OPTS.capture_modes && !OPTS.capture_modes.includes(0x05)
   && OPTS.capture_modes.includes(0x17) ? 0x17 : m.p;
 async function setMode(m) {
@@ -981,7 +981,7 @@ function renderPocket(s) {
   }
   $('zoomRow').hidden = !stops.length;
   $('zoomNow').textContent = pk.zoom != null ? pk.zoom.toFixed(1) + '×' : '';
-  // The Pocket 4 Pro refuses to zoom in D-Log2 (0x41): it takes D-Log.
+  // The Pocket 4P refuses to zoom in D-Log2 (0x41): it takes D-Log.
   const dlog2 = pk.model_id === 0x22 && s.image && s.image.color === 0x41;
   $('pocketNote').textContent = dlog2 ? 'Zoom is not available in D-Log2: switch the color profile to D-Log to zoom.'
     : 'Hold the arrows (or the arrow keys; Shift: faster) to move the gimbal, C recenters. + and − zoom while held.';
