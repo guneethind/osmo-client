@@ -52,7 +52,13 @@ async def run(args: argparse.Namespace) -> None:
     threading.Thread(target=app.settings_loop, args=(stop,), daemon=True, name="settings").start()
     threading.Thread(target=app.media_hold_loop, args=(stop,), daemon=True, name="media-hold").start()
     threading.Thread(target=app.pocket_loop, args=(stop,), daemon=True, name="pocket-controls").start()
-    start_server(app, args.port)
+    try:
+        start_server(app, args.port)
+    except OSError as error:
+        log(f"Port {args.port} is already in use ({error.strerror or error}): Osmo Client is probably running "
+            f"already (http://127.0.0.1:{args.port}/). Close it first, or start this one with --port")
+        stop.set()
+        return
     if not args.no_browser:
         webbrowser.open(f"http://127.0.0.1:{args.port}/")
     home = args.home or wifi.current_network(args.interface)
@@ -302,6 +308,8 @@ async def run(args: argparse.Namespace) -> None:
                         + " the TCP poke")
                     app.registry.set_transport(target, other)
                     app.set_stage("error", str(error))
+                else:
+                    log(f"Session ended: {error}")
             except Exception:  # noqa: BLE001
                 pass
             if app.target != target:

@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import collections
 import concurrent.futures
+import io
+import socket
 import threading
 import time
 import urllib.error
 import urllib.request
+
+from PIL import Image
 
 from camlink import ble, camera as cam, media
 from camlink.datalink import Datalink
@@ -22,6 +26,33 @@ from .downloads import Downloader, default_download_dir
 from .library import MediaCache
 from .multiview import MAX_EXTRA, Tile
 from .state import CameraState
+
+
+# Thumbnails narrower than this (the Osmo Pocket 3 keeps 90 × 90 ones) are made from the camera's larger
+# preview instead (.SCR, 720 px there), shrunk to fit THUMB_SIZE.
+THUMB_MIN = 200
+THUMB_SIZE = 512
+
+
+def _image_width(data: bytes) -> int:
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return image.size[0]
+    except Exception:  # noqa: BLE001 - not an image we can read: leave it as it is
+        return 0
+
+
+def _shrink(data: bytes) -> bytes | None:
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.draft("RGB", (THUMB_SIZE, THUMB_SIZE))     # JPEG: decode at a reduced size, much faster
+            image = image.convert("RGB")
+            image.thumbnail((THUMB_SIZE, THUMB_SIZE))
+            out = io.BytesIO()
+            image.save(out, "JPEG", quality=82)
+            return out.getvalue()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 class Pending:
@@ -339,7 +370,7 @@ class App:
         with self._media_cond:
             self._media_chunks[counter] = {}
         answer = self.request(0x00, 0x26, media.list_payload(counter, cursor), timeout=3.0)
-        if answer.get("code") == 0xD8:
+        if answer.get("code") in (0xD8, 0xD6):
             return None, "not available"
         # Without an accepted reply the list may still come (a lost reply): wait for it a little.
         deadline = time.monotonic() + (10 if answer.get("ok") else 2)
@@ -369,7 +400,7 @@ class App:
         try:
             self.media.update(state="listing", error=None)
             self.video_grace = time.monotonic() + 15
-            if not self.state.in_media_mode():
+            if not self.state.in_media_mode() and not self.media_mode_refused:
                 answer = self.request(0x02, 0x0C, cam.ENTER_MEDIA)
                 entered = bool(answer.get("ok"))
                 self.media_mode_refused = not entered
@@ -385,7 +416,9 @@ class App:
             files: dict[tuple[int, str], dict] = {}
             stores = {}
             partial = False                        # a store stopped answering after its newest files
-            for store, first in (("internal", media.CURSOR_INTERNAL), ("sd", media.CURSOR_SD)):
+            stores_to_read = (("sd", media.CURSOR_SD),) if sd_only else (("internal", media.CURSOR_INTERNAL),
+                                                                          ("sd", media.CURSOR_SD))
+            for store, first in stores_to_read:
                 cursor = first
                 for _ in range(200):
                     page, problem = self._list_page(cursor)
@@ -408,7 +441,7 @@ class App:
             for f in result:
                 f["stamp"] = media.capture_time(f["name"]) or f["date"]
             self.media.update(state="idle", files=result, stores=stores, updated=time.time(), cached=False,
-                              partial=partial)
+                              partial=partial, note=self._files_note())
             self._save_media()
             log(f"Media library: {len(result)} files (" + ", ".join(f"{k}: {v}" for k, v in stores.items()) + ")")
             return {"ok": True, "count": len(result), "stores": stores}
@@ -420,6 +453,19 @@ class App:
                 self.request(0x02, 0x0C, cam.LEAVE_MEDIA)
                 self.video_grace = time.monotonic() + 8
             self._media_lock.release()
+
+    def _files_note(self) -> str | None:
+        """On a shared network: why thumbnails and downloads can't work there (the Osmo Pocket 3 refuses
+        connections to its file server), else None."""
+        if self.camera_host == CAMERA_HOST:
+            return None
+        try:
+            socket.create_connection((self.camera_host, 80), timeout=2).close()
+        except ConnectionRefusedError:
+            return media.NO_FILES_ON_NETWORK
+        except OSError:
+            pass
+        return None
 
     def refresh_media(self) -> dict:
         if self.media["state"] == "listing":
@@ -435,7 +481,9 @@ class App:
         if self._media_lock.locked() or (not on and self.downloader.active()) or self.media_mode_refused:
             return {"ok": True}       # list_media handles the mode itself; downloads keep it
         self.video_grace = time.monotonic() + (10 if on else 8)
-        return self.request(0x02, 0x0C, cam.ENTER_MEDIA if on else cam.LEAVE_MEDIA)
+        answer = self.request(0x02, 0x0C, cam.ENTER_MEDIA if on else cam.LEAVE_MEDIA)
+        self.media_mode_refused = answer.get("code") == 0xE0
+        return answer
 
     def media_hold_loop(self, stop: threading.Event) -> None:
         """Keep media mode while the gallery is open or files are downloading (enter it again after a
@@ -457,12 +505,15 @@ class App:
                 if want and not in_media:
                     # Only an accepted request earns the video watchdog's grace: if the camera is gone (flat
                     # battery, Wi-Fi off) the session must be allowed to time out and reconnect.
-                    if self.request(0x02, 0x0C, cam.ENTER_MEDIA, quiet=True).get("ok"):
+                    answer = self.request(0x02, 0x0C, cam.ENTER_MEDIA, quiet=True)
+                    if answer.get("ok"):
                         self.video_grace = time.monotonic() + 10
+                    self.media_mode_refused = answer.get("code") == 0xE0
                 elif not want and in_media and time.monotonic() - last_leave > 10:
+                    # (the Osmo Pocket 3 reports its own on-screen gallery the same way, and refuses this)
                     last_leave = time.monotonic()
                     self.video_grace = time.monotonic() + 8
-                    self.request(0x02, 0x0C, cam.LEAVE_MEDIA)
+                    self.media_mode_refused = self.request(0x02, 0x0C, cam.LEAVE_MEDIA).get("code") == 0xE0
             except Exception as error:  # noqa: BLE001 - never let this thread die
                 log(f"Media mode keeper: {error}")
 
@@ -473,6 +524,7 @@ class App:
         return {"state": self.media["state"], "error": self.media["error"], "updated": self.media["updated"],
                 "stores": self.media["stores"], "files": files, "folder": str(dl.folder),
                 "cached": bool(self.media.get("cached")), "partial": bool(self.media.get("partial")),
+                "note": self.media.get("note") if self.camera_host != CAMERA_HOST else None,
                 "can_delete": self.allow_delete}
 
     def _save_media(self) -> None:
@@ -525,28 +577,48 @@ class App:
             return {"ok": False, "deleted": len(deleted), "error": f"{len(failed)} not deleted (refresh to check)"}
         return {"ok": True, "deleted": len(deleted)}
 
+    def _fetch_file(self, storage: int, path: str) -> bytes | None:
+        """A small camera file (a thumbnail) over HTTP, None when it isn't there. Raises ConnectionRefusedError
+        on a shared network where the camera sends no files (and notes it for the gallery)."""
+        try:
+            with urllib.request.urlopen(media.http_url(storage, path, self.camera_host), timeout=6) as response:
+                return response.read()
+        except (urllib.error.URLError, OSError) as error:
+            if media.refused(error) and self.camera_host != CAMERA_HOST:
+                self.media["note"] = media.NO_FILES_ON_NETWORK
+                raise ConnectionRefusedError from None
+            return None
+
     def thumbnail(self, storage: int, path: str) -> bytes | None:
         key = f"{storage}:{path}"
         if key in self._thumbs:
             self._thumbs.move_to_end(key)
             return self._thumbs[key]
         data = self.cache.thumb(self.state_camera, key) if self.state_camera else None
-        if data is None:
-            stem, _, ext = path.rpartition(".")
-            tries = [path]
-            if "." + ext.upper() in media.THUMB_EXTS:   # the camera may keep it under the other extension
-                tries += [stem + other for other in media.THUMB_EXTS if other != "." + ext.upper()]
-            for attempt in tries:
-                try:
-                    with urllib.request.urlopen(media.http_url(storage, attempt, self.camera_host), timeout=6) as response:
-                        data = response.read()
-                    break
-                except (urllib.error.URLError, OSError):
-                    continue
-            if not data:
+        fetched = data is None
+        stem, _, ext = path.rpartition(".")
+        try:
+            if data is None:
+                tries = [path]
+                if "." + ext.upper() in media.THUMB_EXTS:   # the camera may keep it under the other extension
+                    tries += [stem + other for other in media.THUMB_EXTS if other != "." + ext.upper()]
+                for attempt in tries:
+                    data = self._fetch_file(storage, attempt)
+                    if data:
+                        break
+                if not data:
+                    return None
+            # (only while connected: with the camera away, a cached small one is shown at once)
+            if self.link == "on" and 0 < _image_width(data) < THUMB_MIN and ext.upper() == "THM":
+                larger = self._fetch_file(storage, stem + ".SCR")
+                better = _shrink(larger) if larger else None
+                if better:
+                    data, fetched = better, True
+        except ConnectionRefusedError:
+            if data is None:
                 return None
-            if self.state_camera:
-                self.cache.put_thumb(self.state_camera, key, data)
+        if fetched and self.state_camera:
+            self.cache.put_thumb(self.state_camera, key, data)
         self._thumbs[key] = data
         while len(self._thumbs) > 2000:
             self._thumbs.popitem(last=False)

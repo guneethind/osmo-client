@@ -17,7 +17,9 @@ The listing follows the media protocol documented by the MIT-licensed osmosis pr
 Manifest: u32 record count, then per record a block anchored on a "19 06" tag (T): T-2 file type
 (03 video, 00 photo), T-3 resolution code (video), T-6 duration u16 (s), T-10 handle u32 (bit 30 set =
 internal memory), T-14 size u32, T-18 time (FAT date << 16 | FAT time); then TLVs: 0d <len> file name,
-1a <len> 00 00 00 01 <path without extension>, 1a <len> 00 00 00 02 <thumbnail path>. A video's frame
+1a <len> 00 00 00 01 <path without extension>, 1a <len> 00 00 00 02 <thumbnail path>. The Osmo Nano
+puts the name before the paths, the Osmo Pocket 3 after them (at the end of the record): a path belongs
+to the file whose name it ends with. A video's frame
 rate is a u32 numerator followed by a u32 denominator of 1000 or 1001 within its record. The camera's
 favourite mark: 01 after the bytes 1b 0a 00 00 00 02 02 01 14 02 15 03 in the record, or (T-1 = ff/fe)
 T+8 = 01.
@@ -111,6 +113,10 @@ def _frame_rate(data: bytes, start: int, end: int) -> float | None:
 def parse_manifest(data: bytes) -> list[dict]:
     """The records of one listing page, newest first."""
     names = [(m.start(), m.group(2)) for m in _NAME.finditer(data) if len(m.group(2)) == m.group(1)[0]]
+    by_stem: dict[tuple[int, str], str] = {}     # (1 file | 2 thumbnail, file name without extension) -> path
+    for m in _PATH.finditer(data):
+        value = m.group(2).decode("ascii", "replace")
+        by_stem.setdefault((m.group(1)[0], value.rsplit("/", 1)[-1]), value)
     tags = [data.rfind(b"\x19\x06", names[i - 1][0] if i else 0, pos) for i, (pos, _) in enumerate(names)]
     files = []
     for i, (pos, raw_name) in enumerate(names):
@@ -126,7 +132,10 @@ def parse_manifest(data: bytes) -> list[dict]:
         duration, = struct.unpack_from("<H", data, tag - 6)
         name = raw_name.decode("ascii", "replace")
         ext = name.rsplit(".", 1)[-1] if "." in name else ""
-        paths = {m.group(1)[0]: m.group(2).decode("ascii", "replace") for m in _PATH.finditer(data, pos, end)}
+        stem = name.rsplit(".", 1)[0]
+        paths = {kind: by_stem[kind, stem] for kind in (1, 2) if (kind, stem) in by_stem}
+        if 1 not in paths:                       # paths not named after the file: the ones after its name
+            paths = {m.group(1)[0]: m.group(2).decode("ascii", "replace") for m in _PATH.finditer(data, pos, end)}
         if 1 not in paths:
             continue
         kind = FILE_TYPES.get(data[tag - 2]) or EXT_TYPES.get(ext.upper(), f"type{data[tag - 2]:02x}")
@@ -145,6 +154,17 @@ def parse_manifest(data: bytes) -> list[dict]:
             "res_code": data[tag - 3] if kind == "video" else None,
         })
     return files
+
+
+# On a shared network the Osmo Pocket 3 refuses connections to its file server (it serves files only on its
+# own access point).
+NO_FILES_ON_NETWORK = ("this camera doesn't send files over a shared Wi-Fi network: to see thumbnails and "
+                       "download, switch it to its own Wi-Fi (Cameras → Wi-Fi → Change)")
+
+
+def refused(error: BaseException) -> bool:
+    """The camera turned the connection down (nothing listens there), as opposed to a timeout."""
+    return isinstance(getattr(error, "reason", error), ConnectionRefusedError)
 
 
 def http_url(storage: int, path: str, host: str = CAMERA_HOST) -> str:

@@ -356,6 +356,9 @@
   .gal-bar .seg { margin: 0; grid-template-columns: repeat(4, auto); }
   .gal-bar .seg button { padding: 5px 12px; }
   .gal-info { color: var(--muted); font-size: 13px; }
+  .gal-note { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 14px; padding: 10px 14px;
+              border-radius: var(--radius); border: 1px solid var(--warn); background: var(--surface); font-size: 13px; }
+  .gal-note span { flex: 1 1 320px; }
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 9px; font-size: 13px;
          font-weight: 550; border: 1px solid var(--border-2); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn:hover:not(:disabled) { border-color: var(--muted); }
@@ -716,6 +719,12 @@
     <button class="btn danger" id="galDelete" hidden disabled title="Delete the selected files on the camera">Delete</button>
     <button class="btn" id="galFolder" title="Open the downloads folder">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2h10V19H3z"/></svg>Open folder</button>
+  </div>
+  <div class="gal-note" id="galNote" hidden role="status">
+    <span>This camera doesn't send files over a shared Wi-Fi network, so its thumbnails and downloads can't be
+      shown here. Switch it to its own Wi-Fi to see them (the computer then joins the camera's Wi-Fi; Ethernet keeps
+      your internet).</span>
+    <button class="btn primary" id="galOwnWifi">Switch to its own Wi-Fi</button>
   </div>
   <div class="card gal-dl" id="galDl" hidden>
     <div class="head"><h3>Downloads</h3><span class="gal-info num" id="galDlInfo"></span>
@@ -1783,10 +1792,19 @@ setInterval(() => { if (tab === 'gal') fetch('/api/media/mode/on', { method: 'PO
 window.addEventListener('pagehide', () => { if (tab === 'gal') navigator.sendBeacon('/api/media/mode/off'); });
 function thumbRetry(img) {   // thumbnails fail while the camera reconnects: try again a few times
   const n = +(img.dataset.n || 0);
-  if (n >= 6) return;
+  if (n >= 6 || (M && M.note)) return;      // (not on a network where the camera sends no files)
   img.dataset.n = n + 1;
   setTimeout(() => { img.src = img.src.replace(/&r=\d+$/, '') + '&r=' + Date.now(); }, 2500 * (n + 1));
 }
+$('galOwnWifi').onclick = async () => {
+  const address = S && S.active && S.active.address;
+  if (!address) return;
+  const r = await (await fetch('/api/cameras/network', { method: 'POST', body: JSON.stringify({ address, ssid: null }) })).json();
+  if (!r.ok) { toast(r.error, true); return; }
+  activity('The camera will use its own Wi-Fi: reconnecting', 'info');
+  if (M) M.note = null;
+  renderGallery();
+};
 $('tabCam').onclick = () => setTab('cam');
 $('tabGal').onclick = () => setTab('gal');
 $('tabMv').onclick = () => setTab('mv');
@@ -1920,6 +1938,7 @@ function renderGallery() {
     : `${plural(M.files.length, 'file')} · ${plural(videos, 'video')} · ${plural(M.files.length - videos, 'photo')} · ${fmtSize(total)}`
       + (listing ? ' · reading…' : M.cached ? ' · as of last time (Refresh to read the camera)'
         : M.partial ? ' · the newest only: the camera did not list older files' : '');
+  $('galNote').hidden = !(M && M.note && S && S.active);
   $('galRefresh').disabled = listing || !(S && S.link === 'on' && S.connected);
   $('galEmpty').hidden = files.length > 0;
   $('galEmpty').textContent = !M || (listing && !M.files.length) ? "Reading the camera's gallery…"

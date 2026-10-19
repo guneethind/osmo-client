@@ -173,6 +173,8 @@ class Downloader:
                     break
                 error = OSError("the camera closed the connection")   # resume where it stopped
             except (urllib.error.URLError, OSError) as caught:
+                if media.refused(caught) and self.host != CAMERA_HOST:
+                    raise OSError(media.NO_FILES_ON_NETWORK) from None
                 error = caught
             failures += 1
             if failures > 8:

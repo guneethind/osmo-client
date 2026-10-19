@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import io
 import json
+import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -122,6 +124,23 @@ def _jpeg(source) -> bytes | None:
     frame.to_image().save(buffer, "JPEG", quality=80)
     source.jpeg_cache = (seq, buffer.getvalue())
     return source.jpeg_cache[1]
+
+
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+    # On Windows the usual address reuse would let a second copy of the app take the same port without an
+    # error, and two copies fight over the camera (one moves its Wi-Fi, the other moves it back).
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def handle_error(self, request, client_address) -> None:
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return                          # the page went away while being answered (a closed tab, a skipped image)
+        super().handle_error(request, client_address)
 
 
 def start_server(app: App, port: int) -> ThreadingHTTPServer:
@@ -513,7 +532,7 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             else:
                 self.send_error(404)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = _Server(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True, name="web").start()
     log(f"Osmo Client: http://127.0.0.1:{port}/")
     return server

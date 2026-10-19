@@ -338,7 +338,8 @@ def parse_status(p: bytes) -> dict | None:
         "free_mb": u32(9),
         "shots_left": u32(13),
         "time_left": u32(17),             # seconds of video that still fit
-        "elapsed": u32(29),               # seconds recorded in the current clip
+        # seconds recorded in the current clip (u16: the Osmo Pocket 3 keeps 02 in byte 32)
+        "elapsed": int.from_bytes(p[29:31], "little"),
         "capture_mode": p[57],            # MODES
     }
 

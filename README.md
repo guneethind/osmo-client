@@ -86,7 +86,8 @@ to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, F
 speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
 from the OpenPocketCine project's notes. Used with a real Osmo Pocket 3; the Pocket 4 and 4P are not
 tested with this app yet. The Pocket 3's gallery lists its newest files (about 45): it doesn't take the
-media mode that listing older ones needs.
+media mode that listing older ones needs. Its thumbnails and downloads need its own Wi-Fi: on a shared
+network it doesn't send files.
 
 Other DJI Osmo cameras (Action 4/5 Pro/6) use the same protocol and may work, fully or in part; the
 commands were mapped on the Osmo Nano. The Osmo 360 is not supported.
