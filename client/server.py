@@ -204,8 +204,12 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 self._json(app.record(False))
             elif path == "/api/photo":
                 self._json(app.take_photo())
-            elif path in ("/api/link/on", "/api/link/off"):
-                (app.want_link.set if path.endswith("on") else app.want_link.clear)()
+            elif path == "/api/link/on":
+                app.want_link.set()
+                self._json({"ok": True})
+            elif path == "/api/link/off":
+                app.want_link.clear()
+                app.set_stage(None)          # stopped on purpose: no error left to show
                 self._json({"ok": True})
             elif path.startswith("/api/mode/"):
                 mode = self._tail_int()

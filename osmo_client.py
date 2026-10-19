@@ -34,7 +34,7 @@ from camlink.video import VideoDecoder
 from client.app import App
 from client.server import start_server
 from client.station import back_to_own_wifi, reach
-from client.watchdog import FeedWatchdog
+from client.watchdog import FeedWatchdog, start_wait
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -69,6 +69,7 @@ async def run(args: argparse.Namespace) -> None:
     task: asyncio.Future | None = None
     joined = False                   # the Wi-Fi was moved to the camera (so disconnecting restores it)
     station = False                  # the camera was asked to join a shared network in this BLE session
+    quiet = 0                        # sessions in a row that got no video (each waits longer for it)
 
     def wanted() -> bool:
         return app.want_link.is_set() and app.target is not None
@@ -108,6 +109,7 @@ async def run(args: argparse.Namespace) -> None:
         while not stop.is_set():
             app.target_changed.clear()
             if not wanted():
+                quiet = 0
                 # Disconnected, or no camera chosen yet: release the camera (BLE + Wi-Fi) so the phone app
                 # or the dock can use it, put the computer back on its own network, and listen for cameras
                 # around (that is also how the page shows whether the camera is asleep).
@@ -140,6 +142,8 @@ async def run(args: argparse.Namespace) -> None:
                 if app.target != target or not wanted():
                     continue
                 app.use_camera(target, (known or {}).get("name") or link.name)
+                app.reconnect.clear()    # the camera's Wi-Fi setting is read here: only later changes restart
+                known = app.registry.get(target) or known
                 transport = (known or {}).get("transport") or dict(DEFAULT_TRANSPORT)
                 network = (known or {}).get("network")
                 if network:
@@ -162,6 +166,14 @@ async def run(args: argparse.Namespace) -> None:
                     with contextlib.suppress(Exception):
                         await link.close()
                 link = None
+                if isinstance(error, wifi.NoWifi):
+                    # The computer can't join the camera's access point, now or later: the camera can join
+                    # a network the computer is on instead (Ethernet to the router is fine).
+                    app.set_stage("error", f"{error}. Have the camera join a network this computer is on "
+                                           "instead: Cameras, then Wi-Fi → Change")
+                    log(f"Could not connect: {error}")
+                    app.want_link.clear()
+                    continue
                 if app.registry.get(target) is None:
                     # A new camera that did not pair (prompt not approved, out of range...): don't keep
                     # asking it to approve; wait for the user to try again from the page.
@@ -183,7 +195,7 @@ async def run(args: argparse.Namespace) -> None:
             app.state.connected = True
             task = asyncio.ensure_future(asyncio.to_thread(session.run))
             started = time.monotonic()
-            watchdog = FeedWatchdog(args.stall, started)
+            watchdog: FeedWatchdog | None = None   # from the live view request (a handshake can take seconds)
             while not task.done() and not stop.is_set():
                 await asyncio.sleep(0.3)
                 now = time.monotonic()
@@ -196,8 +208,11 @@ async def run(args: argparse.Namespace) -> None:
                     app.reconnect.clear()
                     session.stop()
                 elif app.state.in_playback():
-                    watchdog.started = now       # the gallery pauses the live view; the link is fine
+                    if watchdog:
+                        watchdog.started = now   # the gallery pauses the live view; the link is fine
                 elif session.ready.is_set() and not session.stopped.is_set():
+                    if watchdog is None:
+                        watchdog = FeedWatchdog(args.stall, now, start_wait(quiet))
                     step = watchdog.check(now, session.last_video, app.last_frame, app.video_grace,
                                           session.frames.truncated if session.frames else 0)
                     if step == "keyframe":
@@ -206,12 +221,14 @@ async def run(args: argparse.Namespace) -> None:
                         with contextlib.suppress(OSError):
                             session.request_keyframe()
                     elif step == "restart":
-                        log(f"No video, restarting the session ({session.summary()})")
+                        waited = "" if session.last_video else f" in {now - watchdog.started:.0f} s"
+                        log(f"No video{waited}, restarting the session ({session.summary()})")
                         app.recovery = "Restarting the video link…"
                         session.stop()
             app.datalink = None
             app.state.connected = False
             session.stop()
+            quiet = 0 if session.last_video else quiet + 1
             try:
                 await task
             except RuntimeError as error:
@@ -226,6 +243,7 @@ async def run(args: argparse.Namespace) -> None:
             except Exception:  # noqa: BLE001
                 pass
             if app.target != target:
+                quiet = 0
                 await release()          # another camera picked: drop this one before connecting
             if not stop.is_set():
                 await pause(1)

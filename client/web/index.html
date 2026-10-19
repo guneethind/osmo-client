@@ -1376,7 +1376,8 @@ function render() {
   if (!s) veil = ['The app is not responding', 'Start Osmo Client again and reload this page.', false];
   else if (off) {
     const wifi = s.home ? ` This computer's Wi-Fi is back on “${s.home}”.` : '';
-    if (!cam) veil = ['Disconnected', 'Looking for the camera over Bluetooth… If it does not show up, it is fully off or too far away.' + wifi, true];
+    if (s.stage === 'error') veil = ['Could not connect', s.stage_error || 'error', false];   // gave up: say why
+    else if (!cam) veil = ['Disconnected', 'Looking for the camera over Bluetooth… If it does not show up, it is fully off or too far away.' + wifi, true];
     else if (cam.power === 'asleep') veil = ['Camera asleep', 'Connecting wakes it up.' + wifi, false];
     else veil = ['Disconnected', 'The camera is on and free (you can use the phone app or the dock). If nobody uses it, it goes to sleep by itself.' + wifi, false];
   }

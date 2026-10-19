@@ -125,7 +125,7 @@ class App:
                 quiet: bool = False, receiver: int | None = None) -> dict:
         """Send a command and wait for the camera's reply (matched by sequence). Result code 00 = OK."""
         link = self.datalink
-        if link is None:
+        if link is None or not link.ready.is_set():  # nothing before the handshake and the live view start
             return {"ok": False, "error": "not connected to the camera"}
         if not self._command_lock.acquire(timeout=timeout):
             return {"ok": False, "error": "another command is in progress"}
