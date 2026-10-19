@@ -110,6 +110,19 @@ async def run(args: argparse.Namespace) -> None:
         await back_to_own_wifi(link, app.registry, station)
         station = False
 
+    async def joined_by_hand(camera: ble.BleLink, why: str) -> None:
+        """This computer can't move its Wi-Fi by itself (Linux without NetworkManager): wait until the user
+        joins the camera's network by hand. The Bluetooth link stays up meanwhile, which keeps the camera's
+        Wi-Fi awake: no pairing again every few seconds."""
+        app.set_stage("wifi")
+        app.set_stage_note(f"{why}. Waiting for this computer to join “{camera.ssid}”…")
+        log(f"{why}. Waiting for this computer to join {camera.ssid}")
+        while not wifi.on_camera_network():
+            if camera.disconnected.is_set():
+                raise RuntimeError("The camera dropped the Bluetooth link")
+            await asyncio.sleep(1)
+        log(f"On the camera network ({wifi.local_ip_towards(CAMERA_HOST)})")
+
     async def reach_on_network(target: str, network: str, port: int, given_up: threading.Event) -> str:
         """Station mode: the computer stays on its own network and the camera joins `network`."""
         nonlocal joined, station
@@ -187,7 +200,11 @@ async def run(args: argparse.Namespace) -> None:
                     joined = True        # set first: a failed join may already have left the home network
                     # an Osmo Pocket on 5.8 GHz can take about a minute to bring its access point up
                     timeout = max(args.join_timeout, 90) if (known or {}).get("model_id") in models.POCKETS else args.join_timeout
-                    await asyncio.to_thread(wifi.join, link.ssid, link.password, timeout, args.interface)
+                    try:
+                        await asyncio.to_thread(wifi.join, link.ssid, link.password, timeout, args.interface)
+                    except wifi.JoinByHand as error:
+                        joined = False   # the user moves the computer's Wi-Fi, and moves it back
+                        await unless_changed(joined_by_hand(link, str(error)), threading.Event())
                 app.camera_host = app.downloader.host = host
                 if transport.get("poke", True):
                     await asyncio.to_thread(datalink.poke, host)
