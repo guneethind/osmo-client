@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import concurrent.futures
 import threading
 import time
 import urllib.error
@@ -12,13 +13,14 @@ import urllib.request
 from camlink import ble, camera as cam, media
 from camlink.datalink import Datalink
 from camlink.duml import Message
-from camlink.models import MODELS, POCKETS, TESTED_MODELS
+from camlink.models import MODELS, POCKETS, SD_ONLY, TESTED_MODELS
 from camlink.protocol import ADDR_GIMBAL, CAMERA_HOST
 from camlink.registry import CameraRegistry
 from camlink.util import data_dir, log
 
 from .downloads import Downloader, default_download_dir
 from .library import MediaCache
+from .multiview import MAX_EXTRA, Tile
 from .state import CameraState
 
 
@@ -69,6 +71,8 @@ class App:
         # page goes quiet.
         self.media_hold = False
         self.media_hold_seen = 0.0
+        # The Osmo Pocket 3 refuses media mode (02/0C answers e0) yet lists its newest files: don't keep asking.
+        self.media_mode_refused = False
         self.want_link = threading.Event()     # the UI's connect / disconnect switch
         self.reconnect = threading.Event()     # restart the session (the camera's Wi-Fi setting changed)
         self.want_link.set()
@@ -86,6 +90,7 @@ class App:
         self.stage_note: str | None = None     # progress within the current step (network join attempts...)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.state_camera: str | None = None   # camera the state and gallery shown belong to
+        self.tiles: dict[str, Tile] = {}       # Multiview: extra cameras, by address
 
     # ---- incoming data -------------------------------------------------------------------------
     def on_frame(self, frame, _first_packet: float = 0.0) -> None:
@@ -302,21 +307,19 @@ class App:
 
     def set_video_format(self, res: int, fps: int) -> dict:
         """Resolution + frame rate for the current capture mode (slow-mo adds its speed factor). The camera
-        restarts its encoder, so the live view pauses for a few seconds: tell the session watchdog. A 4:3
-        resolution needs the aspect switched to 4:3 first."""
+        restarts its encoder, so the live view pauses for a few seconds: tell the session watchdog. On the Osmo
+        Nano a 4:3 resolution needs the aspect switched to 4:3 first; the Osmo Pockets carry the aspect in
+        the resolution code."""
         self.video_grace = time.monotonic() + 12
         mode = self.state.capture_mode()
-        if mode == cam.MODE_SLOWMO:
-            payload = bytes((res, fps, 0, 0, cam.FRAME_RATES.get(fps, 120) // 30))
-        else:
-            payload = bytes((res, fps, 0, 0, 0))
-            # A 16:9 code switches the picture back by itself but leaves the aspect setting at 4:3, so in
-            # Video mode set the aspect explicitly either way.
-            if res in cam.RES_4_3 or mode == cam.MODE_VIDEO:
-                aspect = self.request(0x02, 0x8E, cam.parameter_tlv_set(cam.ASPECT_TLV, 1 if res in cam.RES_4_3 else 2))
-                if not aspect.get("ok"):
-                    return aspect
-        return self.set_setting(0x18, payload)
+        model = (self.registry.get(self.target) or {}).get("model_id")
+        # A 16:9 code switches the Nano's picture back by itself but leaves its aspect setting at 4:3, so
+        # in Video mode set the aspect explicitly either way.
+        if mode != cam.MODE_SLOWMO and model not in POCKETS and (res in cam.RES_4_3 or mode == cam.MODE_VIDEO):
+            aspect = self.request(0x02, 0x8E, cam.parameter_tlv_set(cam.ASPECT_TLV, 1 if res in cam.RES_4_3 else 2))
+            if not aspect.get("ok"):
+                return aspect
+        return self.set_setting(0x18, cam.video_format_payload(model, mode, res, fps))
 
     def set_white_balance(self, manual: bool, kelvin: int | None) -> dict:
         """Auto keeps the manual temperature the camera remembers; manual sets one (2000-10000 K)."""
@@ -336,15 +339,18 @@ class App:
         with self._media_cond:
             self._media_chunks[counter] = {}
         answer = self.request(0x00, 0x26, media.list_payload(counter, cursor), timeout=3.0)
-        if not answer.get("ok"):
-            return None, "not available" if answer.get("code") == 0xD8 else answer.get("error", "no reply")
-        deadline = time.monotonic() + 10
+        if answer.get("code") == 0xD8:
+            return None, "not available"
+        # Without an accepted reply the list may still come (a lost reply): wait for it a little.
+        deadline = time.monotonic() + (10 if answer.get("ok") else 2)
         with self._media_cond:
             while time.monotonic() < deadline:
                 if any(kind == media.CHUNK_END for kind, _ in self._media_chunks.get(counter, {})):
                     break
                 self._media_cond.wait(0.3)
             page = self._media_chunks.pop(counter, {})
+        if not page and not answer.get("ok"):
+            return None, answer.get("error", "no reply")
         if not any(kind == media.CHUNK_END for kind, _ in page):
             return None, "the camera did not finish sending the list"
         data = b"".join(page[k]["data"] for k in sorted(k for k in page if k[0] == media.CHUNK_DATA))
@@ -364,24 +370,33 @@ class App:
             self.media.update(state="listing", error=None)
             self.video_grace = time.monotonic() + 15
             if not self.state.in_media_mode():
-                entered = self.request(0x02, 0x0C, cam.ENTER_MEDIA)
-                if not entered.get("ok"):
-                    raise RuntimeError(entered.get("error", "the camera did not enter media mode"))
-                for _ in range(40):
-                    if self.state.in_media_mode():
-                        break
-                    time.sleep(0.1)
-                time.sleep(1.7)                    # the camera needs a moment before the first query
+                answer = self.request(0x02, 0x0C, cam.ENTER_MEDIA)
+                entered = bool(answer.get("ok"))
+                self.media_mode_refused = not entered
+                if entered:
+                    for _ in range(40):
+                        if self.state.in_media_mode():
+                            break
+                        time.sleep(0.1)
+                    time.sleep(1.7)                # the camera needs a moment before the first query
+                else:
+                    log(f"No media mode ({answer.get('error')}): listing without it")
+            sd_only = (self.registry.get(self.target) or {}).get("model_id") in SD_ONLY
             files: dict[tuple[int, str], dict] = {}
             stores = {}
+            partial = False                        # a store stopped answering after its newest files
             for store, first in (("internal", media.CURSOR_INTERNAL), ("sd", media.CURSOR_SD)):
                 cursor = first
                 for _ in range(200):
                     page, problem = self._list_page(cursor)
                     if page is None:
                         stores.setdefault(store, problem)
+                        partial = partial or cursor != first
                         break
                     stores[store] = "ok"
+                    if sd_only:
+                        for f in page:
+                            f["storage"] = 0
                     new = [f for f in page if (f["storage"], f["path"]) not in files]
                     for f in new:
                         files[(f["storage"], f["path"])] = f
@@ -392,7 +407,8 @@ class App:
             result = sorted(files.values(), key=lambda f: (media.capture_time(f["name"]) or "", f["name"]), reverse=True)
             for f in result:
                 f["stamp"] = media.capture_time(f["name"]) or f["date"]
-            self.media.update(state="idle", files=result, stores=stores, updated=time.time(), cached=False)
+            self.media.update(state="idle", files=result, stores=stores, updated=time.time(), cached=False,
+                              partial=partial)
             self._save_media()
             log(f"Media library: {len(result)} files (" + ", ".join(f"{k}: {v}" for k, v in stores.items()) + ")")
             return {"ok": True, "count": len(result), "stores": stores}
@@ -400,7 +416,7 @@ class App:
             self.media.update(state="error", error=str(error))
             return {"ok": False, "error": str(error)}
         finally:
-            if not self.media_hold and not self.downloader.active():
+            if not self.media_hold and not self.downloader.active() and not self.media_mode_refused:
                 self.request(0x02, 0x0C, cam.LEAVE_MEDIA)
                 self.video_grace = time.monotonic() + 8
             self._media_lock.release()
@@ -416,7 +432,7 @@ class App:
         if on == self.media_hold:
             return {"ok": True}
         self.media_hold = on
-        if self._media_lock.locked() or (not on and self.downloader.active()):
+        if self._media_lock.locked() or (not on and self.downloader.active()) or self.media_mode_refused:
             return {"ok": True}       # list_media handles the mode itself; downloads keep it
         self.video_grace = time.monotonic() + (10 if on else 8)
         return self.request(0x02, 0x0C, cam.ENTER_MEDIA if on else cam.LEAVE_MEDIA)
@@ -431,7 +447,8 @@ class App:
                 if self.media_hold and time.monotonic() - self.media_hold_seen > 30:
                     log("Gallery closed: leaving media mode")
                     self.media_hold = False
-                if self.datalink is None or not self.state.connected or self._media_lock.locked():
+                if (self.datalink is None or not self.state.connected or self._media_lock.locked()
+                        or self.media_mode_refused):
                     continue
                 if self.state.snapshot()["record"] is None:
                     continue
@@ -455,7 +472,8 @@ class App:
                       res=cam.RESOLUTIONS.get(f.get("res_code"))) for f in self.media["files"]]
         return {"state": self.media["state"], "error": self.media["error"], "updated": self.media["updated"],
                 "stores": self.media["stores"], "files": files, "folder": str(dl.folder),
-                "cached": bool(self.media.get("cached")), "can_delete": self.allow_delete}
+                "cached": bool(self.media.get("cached")), "partial": bool(self.media.get("partial")),
+                "can_delete": self.allow_delete}
 
     def _save_media(self) -> None:
         if self.state_camera:
@@ -514,10 +532,18 @@ class App:
             return self._thumbs[key]
         data = self.cache.thumb(self.state_camera, key) if self.state_camera else None
         if data is None:
-            try:
-                with urllib.request.urlopen(media.http_url(storage, path, self.camera_host), timeout=6) as response:
-                    data = response.read()
-            except (urllib.error.URLError, OSError):
+            stem, _, ext = path.rpartition(".")
+            tries = [path]
+            if "." + ext.upper() in media.THUMB_EXTS:   # the camera may keep it under the other extension
+                tries += [stem + other for other in media.THUMB_EXTS if other != "." + ext.upper()]
+            for attempt in tries:
+                try:
+                    with urllib.request.urlopen(media.http_url(storage, attempt, self.camera_host), timeout=6) as response:
+                        data = response.read()
+                    break
+                except (urllib.error.URLError, OSError):
+                    continue
+            if not data:
                 return None
             if self.state_camera:
                 self.cache.put_thumb(self.state_camera, key, data)
@@ -533,6 +559,8 @@ class App:
         snap["link"] = self.link
         snap["recovery"] = self.recovery
         pocket = self.pocket_model()
+        if snap.get("capture_mode") is not None:
+            snap["capture_mode_name"] = cam.mode_name(snap["capture_mode"], pocket)
         settings = snap.get("settings") or {}
         snap["pocket"] = None if pocket is None else {
             "model_id": pocket,
@@ -541,6 +569,9 @@ class App:
             "zoom_stops": cam.zoom_stops(pocket, settings.get("resolution_code"), snap.get("capture_mode")),
         }
         snap["home"] = self.home
+        tiles = [t.snapshot() for t in list(self.tiles.values())]
+        snap["multiview"] = {"cameras": len(tiles),
+                             "recording": sum(1 for t in tiles if (t["record"] or {}).get("state") == "recording")}
         snap["media_state"] = self.media["state"]
         snap["downloads_active"] = self.downloader.active()
         # The active camera: what we know of it, plus its advertisement (only heard while disconnected).
@@ -577,6 +608,7 @@ class App:
                                   files=cached["files"], cached=True)
             self._thumbs.clear()
             self.media_hold = False
+            self.media_mode_refused = False
             self.state_camera = address
         self.downloader.sub = "".join(ch for ch in (name or address) if ch.isalnum() or ch in "-_ ").strip() or "camera"
 
@@ -614,6 +646,8 @@ class App:
     def select(self, address: str) -> dict:
         """Make `address` the active camera (a new one gets paired: the camera asks to approve "OSMO")."""
         address = address.upper()
+        if address in self.tiles:            # it was shown in Multiview: one session per camera
+            self.tiles[address].close()
         seen = self.nearby.get(address)
         if seen and seen.get("unsupported"):
             return {"ok": False, "error": seen["unsupported"]}
@@ -644,8 +678,69 @@ class App:
             self.want_link.set()             # "Save and reconnect", also after giving up (a refused network)
         return {"ok": True}
 
+    # ---- Multiview ------------------------------------------------------------------------------
+    def multiview_snapshot(self) -> dict:
+        candidates = [{"address": c["address"], "name": c.get("name") or c["address"], "model": c.get("model"),
+                       "network": c.get("network")}
+                      for c in self.registry.public() if c["address"] != self.target and c["address"] not in self.tiles]
+        return {"tiles": [t.snapshot() for t in list(self.tiles.values())], "candidates": candidates, "max": MAX_EXTRA}
+
+    def add_tile(self, address: str) -> dict:
+        address = address.upper()
+        known = self.registry.get(address)
+        if known is None:
+            return {"ok": False, "error": "unknown camera"}
+        if address == self.target:
+            return {"ok": False, "error": "that is the active camera"}
+        if address in self.tiles:
+            return {"ok": True}
+        if len(self.tiles) >= MAX_EXTRA:
+            return {"ok": False, "error": f"up to {MAX_EXTRA} more cameras"}
+        if not known.get("network"):
+            return {"ok": False, "error": "set a shared Wi-Fi network for it first (Cameras → Wi-Fi → Change)"}
+        if self.loop is None:
+            return {"ok": False, "error": "the app is starting"}
+        tile = Tile(self, address)
+        self.tiles[address] = tile
+        future = asyncio.run_coroutine_threadsafe(tile.run(), self.loop)
+        future.add_done_callback(lambda _f: self.tiles.pop(address) if self.tiles.get(address) is tile else None)
+        log(f"Multiview: adding {tile.name}")
+        return {"ok": True}
+
+    def disconnect(self) -> dict:
+        """The page's Disconnect: release every camera, the active one and the Multiview ones (each goes back
+        to its own Wi-Fi)."""
+        self.want_link.clear()
+        self.set_stage(None)                  # stopped on purpose: no error left to show
+        for tile in list(self.tiles.values()):
+            tile.close()
+        return {"ok": True}
+
+    def remove_tile(self, address: str) -> dict:
+        tile = self.tiles.get(address.upper())
+        if tile is not None:
+            tile.close()
+        return {"ok": True}
+
+    def record_all(self, start: bool) -> dict:
+        """Start or stop recording on the active camera and every live extra one at the same time. Each
+        result is the camera's own reply; nothing is repeated."""
+        name = (self.registry.get(self.target) or {}).get("name") or "Active camera"
+        jobs = [(name, lambda: self.record(start))] if self.datalink is not None else []
+        jobs += [(t.name, lambda t=t: t.record(start)) for t in list(self.tiles.values()) if t.state == "live"]
+        if not jobs:
+            return {"ok": False, "error": "no camera is connected"}
+        with concurrent.futures.ThreadPoolExecutor(len(jobs)) as pool:
+            replies = list(pool.map(lambda job: (job[0], job[1]()), jobs))
+        results = [{"name": n, "ok": bool(r.get("ok")), "error": r.get("error")} for n, r in replies]
+        confirmed = sum(r["ok"] for r in results)
+        log(f"Record all ({'start' if start else 'stop'}): {confirmed} of {len(results)} confirmed")
+        return {"ok": confirmed == len(results), "confirmed": confirmed, "total": len(results), "results": results}
+
     def forget(self, address: str) -> None:
         address = address.upper()
+        if address in self.tiles:
+            self.tiles[address].close()
         self.registry.forget(address)
         self.cache.forget(address)
         if self.target == address:

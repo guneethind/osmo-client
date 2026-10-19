@@ -25,10 +25,10 @@ WEB_FILES = {"/monitor.js": ("monitor.js", "text/javascript; charset=utf-8")}   
 CONTENT_TYPES = {"LRF": "video/mp4", "MP4": "video/mp4", "THM": "image/jpeg", "JPG": "image/jpeg"}
 
 
-def _builtin_formats(mode: int | None) -> list[tuple[int, int]]:
+def _builtin_formats(tables: dict, mode: int | None) -> list[tuple[int, int]]:
     if mode == cam.MODE_SLOWMO:
-        return [(r, f) for r, f, _ in cam.SLOWMO_FORMATS]
-    formats = cam.MODE_FORMATS.get(mode)
+        return [(r, f) for r, f, _ in tables["slowmo"]]
+    formats = tables["formats"].get(mode)
     if not formats:
         return []
     return [(r, f) for r in formats["res"] for f in cam.LIMITED_FPS.get(r, formats["fps"])]
@@ -53,26 +53,32 @@ def exposure_options(app: App) -> dict:
     answer would, so the page knows when to ask again."""
     version, caps = app.state.capabilities()
     mode = app.state.capture_mode()
+    model = (app.registry.get(app.target) or {}).get("model_id")
+    tables = cam.builtin_tables(model)
     pairs = caps.get("camcap_video_format")
     if pairs is None:
-        pairs = _builtin_formats(mode)
+        pairs = _builtin_formats(tables, mode)
     rate = lambda code: cam.FRAME_RATES.get(code, code)  # noqa: E731
     order = {res: i for i, res in reversed(list(enumerate(r for r, _ in pairs)))}   # first appearance
     pairs = sorted(pairs, key=lambda p: (order[p[0]], rate(p[1])))
     formats: dict[int, list[int]] = {}
     slowmo = []
     if mode == cam.MODE_SLOWMO:
-        slowmo = [{"res": r, "fps": f, "label": cam.slowmo_label(r, f)} for r, f in pairs]
+        slowmo = [{"res": r, "fps": f, "label": cam.slowmo_label(r, f, cam.slowmo_factor(model, r, f))} for r, f in pairs]
     else:
         for r, f in pairs:
             formats.setdefault(r, []).append(f)
-    photo = caps.get("camcap_photo_size") or [(s, r) for s in cam.PHOTO_SIZE_CODES for r in cam.PHOTO_RATIOS]
+    photo = caps.get("camcap_photo_size") or tables["photo"]
+    colors = caps.get("camcap_color_mode")
+    if colors is None and mode in (cam.MODE_VIDEO, cam.MODE_SLOWMO):
+        colors = tables["colors"]
     low, high = caps.get("camcap_wb") or (cam.WB_KELVIN.start, cam.WB_KELVIN.stop - 1)
     iso = caps.get("camcap_iso")
     if iso is None:
         iso = cam.MODE_ISO.get(mode, cam.DEFAULT_ISO)
     return {
-        "key": f"{version}:{'' if mode is None else mode}",
+        "key": f"{version}:{'' if mode is None else mode}:{model}",
+        "mode_names": {m: cam.mode_name(m, model) for m in cam.MODES},
         "source": "camera" if caps else "built-in",
         "capture_modes": caps.get("camcap_base"),    # None: not published, show every known mode
         "modes": list(cam.EXPOSURE_MODES),
@@ -88,7 +94,7 @@ def exposure_options(app: App) -> dict:
         # Exposure compensation is a classic command: offered whenever the camera publishes its exposure.
         "ev": [{"thirds": t, "label": cam.ev_label(t)} for t in cam.EV_THIRDS],
         # Image and lapse settings: only what the camera lists for the current capture mode.
-        "color_modes": [{"code": c, "label": cam.color_label(c)} for c in caps.get("camcap_color_mode") or []],
+        "color_modes": [{"code": c, "label": cam.color_label(c)} for c in colors or []],
         "fov": [{"code": c, "label": cam.fov_label(c)} for c in caps.get("camcap_fov") or []],
         "eis": [{"code": c, "label": cam.eis_label(c)} for c in caps.get("camcap_eis") or []],
         "sharpness": caps.get("camcap_sharpness") or [],
@@ -175,18 +181,20 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     while chunk := upstream.read(1 << 16):
                         self.wfile.write(chunk)
 
-        def _stream(self) -> None:
-            """Live view as MJPEG."""
+        def _stream(self, source=app) -> None:
+            """Live view as MJPEG (the active camera's, or a Multiview tile's)."""
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             last = -1
             while True:
-                with app.frame_cond:
-                    app.frame_cond.wait_for(lambda: app.frame_seq != last, timeout=2)
-                    last = app.frame_seq
-                jpeg = _jpeg(app)
+                if source is not app and app.tiles.get(source.address) is not source:
+                    return                   # the camera was removed from Multiview
+                with source.frame_cond:
+                    source.frame_cond.wait_for(lambda: source.frame_seq != last, timeout=2)
+                    last = source.frame_seq
+                jpeg = _jpeg(source)
                 if jpeg is None:
                     continue
                 try:
@@ -208,9 +216,7 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                 app.want_link.set()
                 self._json({"ok": True})
             elif path == "/api/link/off":
-                app.want_link.clear()
-                app.set_stage(None)          # stopped on purpose: no error left to show
-                self._json({"ok": True})
+                self._json(app.disconnect())
             elif path.startswith("/api/mode/"):
                 mode = self._tail_int()
                 if mode not in cam.MODES:
@@ -373,6 +379,27 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._bad("expected {address, ssid, password}")
                     return
                 self._json(app.set_network(address, ssid, password))
+            elif path in ("/api/multiview/add", "/api/multiview/remove"):
+                try:
+                    address = str(self._body()["address"])
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {address}")
+                    return
+                self._json(app.add_tile(address) if path.endswith("add") else app.remove_tile(address))
+            elif path == "/api/multiview/record":
+                try:
+                    body = self._body()
+                    start = bool(body["start"])
+                    address = str(body["address"]).upper() if body.get("address") else None
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {start, address?}")
+                    return
+                if address is None:
+                    self._json(app.record_all(start))
+                elif address in app.tiles:
+                    self._json(app.tiles[address].record(start))
+                else:
+                    self._bad("that camera is not in Multiview")
             elif path == "/api/cameras/scan":
                 if app.loop is not None and app.link == "on":
                     asyncio.run_coroutine_threadsafe(app.quick_scan(), app.loop)
@@ -462,8 +489,16 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             elif path.startswith("/api/media/file"):
                 storage, file_path = self._file_query()
                 self._relay(storage, file_path, filename=file_path.rsplit("/", 1)[-1])
+            elif path.startswith("/stream/tile/"):
+                tile = app.tiles.get(unquote(urlsplit(path).path.rsplit("/", 1)[1]).upper())
+                if tile is None:
+                    self.send_error(404)
+                    return
+                self._stream(tile)
             elif path.startswith("/stream"):
                 self._stream()
+            elif path == "/api/multiview":
+                self._json(app.multiview_snapshot())
             elif path.startswith("/frame.jpg"):
                 jpeg = _jpeg(app)
                 if jpeg is None:

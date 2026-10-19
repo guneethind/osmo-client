@@ -8,9 +8,14 @@ exposure and format settings, camera status, and a gallery to preview and downlo
 
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
-> **New in 1.4 (experimental): Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P),
-> gimbal and zoom controls. Built from another project's notes on these cameras, **not tested with a real
-> Pocket yet**: reports are welcome.
+> **New in 1.6: Multiview (experimental).** Up to four cameras side by side, each with its live picture,
+> and record / stop on all of them at once. Tried with an Osmo Pocket 3 and an Osmo Nano.
+> The **Osmo Pocket 3** now works with a real camera: switching between it and another camera, its own
+> format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
+>
+> **Since 1.4 (experimental): Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P),
+> gimbal and zoom controls. The Pocket 4 and 4P are **not tested with a real camera yet**: reports are
+> welcome.
 >
 > **Since 1.3: a field monitor.** Scopes, false color, zebras, focus peaking, frame guides and a display
 > LUT over the live view; exposure compensation and the camera's light meter; color profile (D-Log M),
@@ -42,12 +47,13 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   camera's own light meter. Each capture mode keeps its own exposure, as on the camera.
 - **Image**: color profile (Normal, 10-bit, D-Log M), field of view, stabilization, sharpness and noise
   reduction, as the camera offers them in each capture mode.
-- **Format**: video resolution (4K, 2.7K, 1080p in 16:9 or 4:3) and frame rate (24–60 fps), slow motion
-  (120 fps 4×, 240 fps 8×), photo size and ratio (L 36/31 MP, M 9/8 MP), timelapse interval
-  (0.5 s–1 h) and duration, hyperlapse speed.
+- **Format**: video resolution (4K, 2.7K, 1080p in 16:9 or 4:3; on the Osmo Pocket 3 16:9, or 1:1 in 1080p,
+  2160p and 3K) and frame rate (24–60 fps), slow motion (120 fps 4×, 240 fps 8×; Pocket 3 also 4K 100 fps),
+  photo size and ratio (Nano L 36/31 MP, M 9/8 MP; Pocket 3 16:9 or 1:1), timelapse interval (0.5 s–1 h)
+  and duration, hyperlapse speed.
 - **Only what the camera offers**: the camera publishes what each capture mode supports (modes,
   resolutions and frame rates, ISO, shutter speeds, photo sizes), and the app offers exactly that. Until
-  that arrives it uses the Osmo Nano's lists.
+  that arrives it uses the Osmo Nano's lists. The Osmo Pocket 3 publishes none: the app uses its own.
 - **Status**: recording state and time, storage free and remaining (video time / photos; internal memory
   and microSD separately), estimated quality and bitrate, battery (%, voltage, temperature, charging), ISO and shutter in use (also in
   Auto).
@@ -65,6 +71,10 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   internet without a second adapter. Set it per camera under Cameras → Wi-Fi → Change. Networks must allow
   WPA2 (the Osmo Nano refuses WPA3-only ones); guest networks that keep devices apart don't work. When you
   disconnect, the camera goes back to its own Wi-Fi.
+- **Multiview (experimental)**: up to four cameras side by side (the active one and three more on a shared
+  Wi-Fi network), each with its live picture, recording state and battery; record or stop one, or all of
+  them at once (a shared command, not frame-accurate sync). Removing a camera, or Disconnect, puts it back
+  on its own Wi-Fi.
 - **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
   computer back on its own Wi-Fi without closing the app.
 - **Day and night themes**: the sun / moon button in the header switches the page between light and dark.
@@ -74,7 +84,9 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
 to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
 speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
-from the OpenPocketCine project's notes; not tested with this app yet.
+from the OpenPocketCine project's notes. Used with a real Osmo Pocket 3; the Pocket 4 and 4P are not
+tested with this app yet. The Pocket 3's gallery lists its newest files (about 45): it doesn't take the
+media mode that listing older ones needs.
 
 Other DJI Osmo cameras (Action 4/5 Pro/6) use the same protocol and may work, fully or in part; the
 commands were mapped on the Osmo Nano. The Osmo 360 is not supported.
@@ -223,6 +235,7 @@ Code layout:
 |---|---|
 | `osmo_client.py` | entry point: connection loop (Bluetooth → Wi-Fi → datalink) |
 | `client/app.py` | commands, settings, gallery and camera selection |
+| `client/multiview.py` | Multiview: one extra camera per tile (its own Bluetooth, network search and session) |
 | `client/state.py` | camera status parsed for the page |
 | `client/downloads.py` | download queue |
 | `client/server.py` | local web server and JSON API (127.0.0.1 only) |

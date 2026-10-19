@@ -81,11 +81,14 @@ SHUTTER_SPEEDS = [0x9F40, 0x9900, 0x9388, 0x8FA0, 0x8C80, 0x89C4, 0x87D0, 0x8640
 # Video format: 02/18 [resolution, fps, 00, 00, slow-mo factor]. Frame-rate codes were checked by
 # recording and reading the files back (code 6 gives 59.94 fps). Video mode takes codes 1-6; 120 and
 # 240 fps belong to Slow-mo.
-FRAME_RATES = {1: 24, 2: 25, 3: 30, 4: 48, 5: 50, 6: 60, 7: 120, 8: 240}
-# Resolution codes, identified by bitrate and live view frame shape. The 4:3 codes are only accepted
-# with the aspect set to 4:3 first; a 16:9 code switches the picture back by itself.
+FRAME_RATES = {1: 24, 2: 25, 3: 30, 4: 48, 5: 50, 6: 60, 7: 120, 8: 240, 0x0A: 100}
+# Resolution codes, identified by bitrate and live view frame shape. On the Osmo Nano the 4:3 codes are
+# only accepted with the aspect set to 4:3 first; a 16:9 code switches the picture back by itself. The
+# square and vertical codes are the Osmo Pocket's (OpenPocketCine's notes).
 RESOLUTIONS = {0x10: "4K 16:9", 0x2D: "2.7K 16:9", 0x0A: "1080p 16:9",
-               0x67: "4K 4:3", 0x5F: "2.7K 4:3", 0x0C: "1080p 4:3"}
+               0x67: "4K 4:3", 0x5F: "2.7K 4:3", 0x0C: "1080p 4:3",
+               0x7D: "4K 1:1", 0x6B: "3K 1:1", 0x6A: "2160p 1:1", 0x69: "1080p 1:1",
+               0x6C: "3K 9:16", 0x43: "2.7K 9:16", 0x42: "1080p 9:16"}
 RES_4_3 = {0x67, 0x5F, 0x0C}
 ASPECT_TLV = 0x46                       # 02/8E parameter TLV: 1 = 4:3, 2 = 16:9
 # What each capture mode accepts (everything else answers E3).
@@ -98,10 +101,25 @@ MODE_FORMATS = {
 LIMITED_FPS = {0x67: [1, 2, 3, 4, 5]}   # 4K 4:3 tops out at 50 fps
 # Slow-mo: (resolution, fps code, speed factor); the factor goes in the last byte of 02/18.
 SLOWMO_FORMATS = [(0x10, 7, 4), (0x2D, 7, 4), (0x0A, 7, 4), (0x0A, 8, 8)]
-# Photo format: 02/12 [size, ratio].
-PHOTO_SIZE_CODES = {4: "L", 3: "M"}
-PHOTO_RATIOS = {0: "4:3", 1: "16:9"}
+# Photo format: 02/12 [size, ratio]. Size 0 is the Osmo Pocket's only one.
+PHOTO_SIZE_CODES = {4: "L", 3: "M", 0: ""}
+PHOTO_RATIOS = {0: "4:3", 1: "16:9", 3: "1:1"}
 PHOTO_MP = {(4, 0): 36, (4, 1): 31, (3, 0): 9, (3, 1): 8}
+NANO_PHOTO_FORMATS = [(4, 0), (4, 1), (3, 0), (3, 1)]
+# The Osmo Pocket 3 publishes no format tables (camcap_video_format is a topic it doesn't have). Its
+# choices, as its own app offers them (a survey in OpenPocketCine's notes): the aspect is part of the
+# resolution code (no 4:3; 1:1 up to 3K; 9:16 only follows the camera's own portrait lock), Low-Light
+# (0x28) offers 1080p / 4K at 24-30 fps, and Slow-mo carries its speed factor in byte 3 of 02/18.
+POCKET3 = 0x0020
+POCKET3_FORMATS = {
+    MODE_VIDEO: {"res": [0x10, 0x2D, 0x0A, 0x6B, 0x6A, 0x69], "fps": [1, 2, 3, 4, 5, 6]},
+    MODE_SUPER_NIGHT: {"res": [0x10, 0x0A], "fps": [1, 2, 3]},
+    MODE_TIMELAPSE: {"res": [0x10, 0x2D, 0x0A], "fps": [2, 3]},
+    MODE_HYPERLAPSE: {"res": [0x10, 0x2D, 0x0A], "fps": [2, 3]},
+}
+POCKET3_SLOWMO = [(0x10, 0x0A, 4), (0x10, 7, 4), (0x2D, 7, 4), (0x0A, 7, 4), (0x0A, 8, 8)]
+POCKET3_PHOTO_FORMATS = [(0, 1), (0, 3)]
+POCKET3_COLOR_MODES = [0x00, 0x3C, 0x3D]       # Normal, HLG, D-Log M (Video and Slow-mo)
 # White balance: 02/2C [mode, kelvin / 100, 00, 00, 00]; mode 0 = auto, 6 = manual colour temperature.
 WB_AUTO, WB_MANUAL = 0x00, 0x06
 WB_KELVIN = range(2000, 10001, 100)
@@ -254,13 +272,42 @@ def shutter_text(raw: int) -> str | None:
 
 
 def photo_label(size: int, ratio: int) -> str:
-    label = f"{PHOTO_SIZE_CODES.get(size, f'size {size}')} {PHOTO_RATIOS.get(ratio, f'ratio {ratio}')}"
+    label = f"{PHOTO_SIZE_CODES.get(size, f'size {size}')} {PHOTO_RATIOS.get(ratio, f'ratio {ratio}')}".strip()
     return label + (f" · {PHOTO_MP[size, ratio]} MP" if (size, ratio) in PHOTO_MP else "")
 
 
-def slowmo_label(res: int, fps: int) -> str:
+def slowmo_label(res: int, fps: int, factor: int | None = None) -> str:
     rate = FRAME_RATES.get(fps, 0)
-    return f"{RESOLUTIONS.get(res, hex(res)).split()[0]} · {rate} fps · {rate // 30}×"
+    return f"{RESOLUTIONS.get(res, hex(res)).split()[0]} · {rate} fps · {factor or rate // 30}×"
+
+
+def builtin_tables(model_id: int | None) -> dict:
+    """What to offer when the camera publishes no table of its own: the Osmo Pocket 3's, else the Osmo
+    Nano's."""
+    if model_id == POCKET3:
+        return {"formats": POCKET3_FORMATS, "slowmo": POCKET3_SLOWMO, "photo": POCKET3_PHOTO_FORMATS,
+                "colors": POCKET3_COLOR_MODES}
+    return {"formats": MODE_FORMATS, "slowmo": SLOWMO_FORMATS, "photo": NANO_PHOTO_FORMATS, "colors": []}
+
+
+def slowmo_factor(model_id: int | None, res: int, fps: int) -> int:
+    return next((x for r, f, x in builtin_tables(model_id)["slowmo"] if (r, f) == (res, fps)),
+                FRAME_RATES.get(fps, 120) // 30)
+
+
+def video_format_payload(model_id: int | None, mode: int | None, res: int, fps: int) -> bytes:
+    """02/18 payload. Slow-mo adds its speed factor: in the last byte on the Osmo Nano, in byte 3 on the
+    Osmo Pocket 3."""
+    if mode != MODE_SLOWMO:
+        return bytes((res, fps, 0, 0, 0))
+    factor = slowmo_factor(model_id, res, fps)
+    return bytes((res, fps, 0, factor, 0)) if model_id == POCKET3 else bytes((res, fps, 0, 0, factor))
+
+
+def mode_name(mode: int, model_id: int | None = None) -> str:
+    if mode == MODE_SUPER_NIGHT and model_id == POCKET3:
+        return "Low-Light"
+    return MODES.get(mode, f"0x{mode:02x}")
 
 
 def match_rate(value: float, table: list[tuple[float, str]]) -> str | None:

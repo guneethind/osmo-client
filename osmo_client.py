@@ -117,7 +117,7 @@ async def run(args: argparse.Namespace) -> None:
         app.set_stage("wifi")
         app.set_stage_note(f"{why}. Waiting for this computer to join “{camera.ssid}”…")
         log(f"{why}. Waiting for this computer to join {camera.ssid}")
-        while not wifi.on_camera_network():
+        while not wifi.on_camera_network(camera.ssid, args.interface):
             if camera.disconnected.is_set():
                 raise RuntimeError("The camera dropped the Bluetooth link")
             await asyncio.sleep(1)
@@ -131,7 +131,8 @@ async def run(args: argparse.Namespace) -> None:
             joined = False
         try:
             return await reach(link, app.registry, target, network, port, app.set_stage, pause,
-                               lambda: not given_up.is_set() and not changed(), note=app.set_stage_note)
+                               lambda: not given_up.is_set() and not changed(),
+                               lambda: {t.host for t in list(app.tiles.values()) if t.host}, note=app.set_stage_note)
         finally:
             # put it back on its own Wi-Fi later only if it was asked to join (or found on the network)
             station = bool((app.registry.get(target) or {}).get("in_station"))
@@ -166,6 +167,12 @@ async def run(args: argparse.Namespace) -> None:
             target = app.target
             known = app.registry.get(target)
             app.link = "connecting"
+            if target in app.tiles:          # it was shown in Multiview: let that session end (and let go of it)
+                app.tiles[target].close()
+                for _ in range(120):
+                    if target not in app.tiles:
+                        break
+                    await asyncio.sleep(0.25)
             network = (known or {}).get("network")
             try:
                 # Pair again whenever BLE dropped (camera asleep, off, restarted) or another camera was
@@ -312,6 +319,12 @@ async def run(args: argparse.Namespace) -> None:
             session.stop()
         if task is not None and not task.done():
             await asyncio.wait({task}, timeout=2)
+        for tile in list(app.tiles.values()):  # Multiview cameras go back to their own Wi-Fi
+            tile.close()
+        for _ in range(80):                  # up to 20 s: a handshake in progress, then the Wi-Fi switch
+            if not app.tiles:
+                break
+            await asyncio.sleep(0.25)
         stop.set()
         if joined:
             await asyncio.to_thread(wifi.restore, home, args.interface)

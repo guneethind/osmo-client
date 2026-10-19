@@ -19,7 +19,7 @@
     --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
   /* Night (the default) and day themes. The picture, its overlays and the media viewer stay dark in both. */
-  :root, .viewer, .thumb, #lightbox {
+  :root, .viewer, .thumb, #lightbox, .mv-tile .pic {
     color-scheme: dark;
     --bg: #0b0d10; --surface: #14171c; --surface-2: #1b1f26; --border: #262b33; --border-2: #323843;
     --text: #e8eaed; --muted: #8b929c; --faint: #5d6470;
@@ -35,7 +35,7 @@
     --on-accent: #ffffff; --on-ok: #ffffff; --danger: #c42b22; --danger-line: #eeb4ae;
     --selected: #dde1e7; --shutter: #2b3038; --shutter-photo: #3a4049; --scrim: rgba(24, 28, 34, .45);
   }
-  .viewer, .thumb, #lightbox { color: var(--text); }
+  .viewer, .thumb, #lightbox, .mv-tile .pic { color: var(--text); }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); }
   body { font: 14px/1.45 system-ui, "Segoe UI", sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
@@ -336,6 +336,22 @@
 
   /* gallery */
   .gallery { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: 20px; }
+  .mv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+  .mv-tile { min-width: 0; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+  .mv-tile.rec { border-color: var(--rec); box-shadow: 0 0 0 1px var(--rec); }
+  .mv-tile .pic { position: relative; aspect-ratio: 16 / 9; background: #000; }
+  .mv-tile .pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .mv-tile .pic .msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center;
+                       color: var(--muted); font-size: 13px; }
+  .mv-tile .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; }
+  .mv-tile .head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mv-tile .head span { color: var(--muted); white-space: nowrap; }
+  .mv-tile .head .rec-dot { color: var(--rec); font-weight: 700; }
+  .mv-tile .head .btn { padding: 3px 10px; }
+  .mv-add { display: flex; gap: 8px; align-items: center; }
+  .mv-add select { font: inherit; font-size: 13px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-2);
+                   border-radius: 8px; padding: 5px 8px; max-width: 260px; }
+  .btn.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
   .gal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
   .gal-bar .seg { margin: 0; grid-template-columns: repeat(4, auto); }
   .gal-bar .seg button { padding: 5px 12px; }
@@ -420,6 +436,7 @@
   <nav class="tabs" role="tablist" aria-label="View">
     <button id="tabCam" role="tab" aria-selected="true">Camera</button>
     <button id="tabGal" role="tab" aria-selected="false">Gallery</button>
+    <button id="tabMv" role="tab" aria-selected="false" title="Several cameras at once (experimental)">Multiview</button>
   </nav>
   <span class="spacer"></span>
   <span class="chip" id="storageChip" hidden title="Free storage">
@@ -665,6 +682,22 @@
   </aside>
 </main>
 
+<section class="gallery" id="multiview" hidden>
+  <div class="gal-bar">
+    <button class="btn rec" id="mvRecord">● Record all</button>
+    <button class="btn" id="mvStop">■ Stop all</button>
+    <span class="gal-info" id="mvInfo"></span>
+    <span class="spacer"></span>
+    <div class="mv-add"><select id="mvPick" aria-label="Camera to add"></select><button class="btn primary" id="mvAdd">Add camera</button></div>
+  </div>
+  <div class="mv-grid" id="mvGrid"></div>
+  <p class="note" id="mvNote">Experimental. Up to four cameras at once: the active one and three more. The computer can't join
+    several cameras' own Wi-Fi at once, so each extra camera joins a shared network: set one for it in Cameras → Wi-Fi →
+    Change (the active camera can keep its own Wi-Fi if the computer reaches the shared network over Ethernet). Recording
+    starts and stops on all of them together, but not frame-accurately; check each camera's tile. Removing a camera puts
+    it back on its own Wi-Fi.</p>
+</section>
+
 <section class="gallery" id="gallery" hidden>
   <div class="gal-bar">
     <div class="seg" id="galFilter" role="group" aria-label="Type">
@@ -856,6 +889,16 @@ MODES.forEach((m, i) => {
   b.onclick = () => setMode(m);
   modesEl.appendChild(b);
 });
+function nameModes() {   // some models call a mode differently (the Osmo Pocket 3's Low-Light)
+  MODES.forEach((m, i) => {
+    m.name = (OPTS && OPTS.mode_names && OPTS.mode_names[m.p]) || m.name;
+    const b = modesEl.children[i];
+    if (b.querySelector('span').textContent === m.name) return;
+    b.querySelector('span').textContent = m.name;
+    b.setAttribute('aria-label', m.name);
+    b.title = `${m.name} (key ${i + 1})`;
+  });
+}
 
 // ---- commands
 async function command(path, label) {
@@ -1079,11 +1122,13 @@ renderAssists();
 // ---- connect / disconnect
 async function setLink(on) {
   if (linkBusy) return;
-  if (!on && isRecording() && !confirm('The camera is recording. Disconnect anyway? (it keeps recording)')) return;
+  const extra = (S && S.multiview) || { cameras: 0, recording: 0 };
+  const recording = (isRecording() ? 1 : 0) + extra.recording;
+  if (!on && recording && !confirm(`${recording > 1 ? `${recording} cameras are` : 'A camera is'} recording. Disconnect anyway? (they keep recording)`)) return;
   linkBusy = true; render();
   try {
     await fetch('/api/link/' + (on ? 'on' : 'off'), { method: 'POST' });
-    activity(on ? 'Connecting to the camera' : 'Disconnected: camera released', 'info');
+    activity(on ? 'Connecting to the camera' : extra.cameras ? `Disconnected: ${extra.cameras + 1} cameras released` : 'Disconnected: camera released', 'info');
   } finally { linkBusy = false; render(); }
 }
 // ---- exposure (per capture mode; ISO and shutter only in Manual)
@@ -1091,7 +1136,7 @@ async function setLink(on) {
 // asks again whenever the status shows a new table or another capture mode.
 let OPTS = null;  // /api/exposure/options
 let optsFor = null, optsLoading = false, optsAgain = false;
-const optsKey = s => `${s.caps_version}:${s.capture_mode == null ? '' : s.capture_mode}`;
+const optsKey = s => `${s.caps_version}:${s.capture_mode == null ? '' : s.capture_mode}:${s.active ? s.active.address : ''}`;
 async function loadOptions() {
   if (optsLoading) { optsAgain = true; return; }
   optsLoading = true; optsAgain = false;
@@ -1102,7 +1147,7 @@ async function loadOptions() {
   optsLoading = false;
   if (!ok) setTimeout(loadOptions, 1000);
   else if (optsAgain) loadOptions();
-  else render();
+  else { nameModes(); render(); }
 }
 const isoLabel = o => o.value ? nf.format(o.value) : 'code ' + o.code;
 const secs = label => label.endsWith('"') ? label : label + ' s';   // 1/50 s, but 30" as it is
@@ -1720,10 +1765,14 @@ function setTab(t) {
   tab = t;
   $('tabCam').setAttribute('aria-selected', String(t === 'cam'));
   $('tabGal').setAttribute('aria-selected', String(t === 'gal'));
+  $('tabMv').setAttribute('aria-selected', String(t === 'mv'));
   document.querySelector('main').hidden = t !== 'cam';
   $('gallery').hidden = t !== 'gal';
+  $('multiview').hidden = t !== 'mv';
   // The camera stays in media mode (no live view, runs cooler) while the gallery is open.
   fetch('/api/media/mode/' + (t === 'gal' ? 'on' : 'off'), { method: 'POST' }).catch(() => {});
+  if (t === 'mv') { view.removeAttribute('src'); pollMultiview(); return; }
+  mvShown.clear(); $('mvGrid').innerHTML = '';   // stop the Multiview streams
   if (t === 'gal') {
     view.removeAttribute('src');
     loadMedia().then(() => { if (!M || (!M.updated && M.state !== 'listing')) refreshMedia(); });
@@ -1740,6 +1789,104 @@ function thumbRetry(img) {   // thumbnails fail while the camera reconnects: try
 }
 $('tabCam').onclick = () => setTab('cam');
 $('tabGal').onclick = () => setTab('gal');
+$('tabMv').onclick = () => setTab('mv');
+
+// ---- Multiview: the active camera and up to three more, each in its own tile
+let MV = null, mvTimer = null;
+const mvShown = new Map();          // tile id -> element (kept so the streams don't restart on every poll)
+async function pollMultiview() {
+  clearTimeout(mvTimer);
+  if (tab !== 'mv') return;
+  try { MV = await (await fetch('/api/multiview', { cache: 'no-store' })).json(); } catch (e) { MV = null; }
+  renderMultiview();
+  mvTimer = setTimeout(pollMultiview, 1000);
+}
+function mvTile(id, src) {
+  let el = mvShown.get(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'mv-tile';
+    el.innerHTML = `<div class="pic"><img alt="" src="${src}"><div class="msg" hidden></div></div><div class="head"></div>`;
+    el.querySelector('img').onerror = e => setTimeout(() => { if (mvShown.get(id) === el) e.target.src = src + '?' + Date.now(); }, 1500);
+    mvShown.set(id, el);
+  }
+  return el;
+}
+function renderMultiview() {
+  const grid = $('mvGrid'), wanted = [];
+  const act = S && S.active;
+  if (act) {                        // the active camera first
+    const el = mvTile('main', '/stream?mv');
+    const live = S.link === 'on' && S.connected && S.video_age != null && S.video_age <= 2;
+    const rec = S.fresh && S.record && S.record.state === 'recording';
+    el.classList.toggle('rec', !!rec);
+    el.querySelector('.msg').hidden = live;
+    el.querySelector('.msg').textContent = S.link === 'off' ? 'Disconnected'
+      : S.link === 'on' ? 'Waiting for the picture…' : S.stage_note || STAGES[S.stage] || 'Connecting…';
+    setHTML(el.querySelector('.head'), `<b>${esc(act.name)}</b><span>active</span><span class="spacer"></span>`
+      + (rec ? `<span class="rec-dot num">● ${clock(S.record.elapsed)}</span>` : `<span>${esc(S.capture_mode_name || '')}</span>`)
+      + (S.battery ? `<span class="num">${S.battery.percent} %</span>` : ''));
+    wanted.push(el);
+  }
+  for (const t of (MV && MV.tiles) || []) {
+    const el = mvTile(t.address, `/stream/tile/${encodeURIComponent(t.address)}`);
+    const rec = t.record && t.record.state === 'recording';
+    el.classList.toggle('rec', !!rec);
+    const live = t.state === 'live' && t.video_age != null && t.video_age <= 2;
+    el.querySelector('.msg').hidden = live;
+    el.querySelector('.msg').textContent = t.state === 'error' ? 'Could not connect: ' + (t.error || '') + ' · retrying…'
+      : t.note || STAGES[t.stage] || (t.state === 'live' ? 'Waiting for the picture…' : 'Connecting…');
+    setHTML(el.querySelector('.head'), `<b>${esc(t.name)}</b><span>${esc(t.host || '')}</span><span class="spacer"></span>`
+      + (rec ? `<span class="rec-dot num">● ${clock(t.record.elapsed)}</span>` : `<span>${esc(t.mode || '')}</span>`)
+      + (t.battery != null ? `<span class="num">${t.battery} %</span>` : '')
+      + `<button class="btn" data-mv-rec="${esc(t.address)}" data-on="${rec ? 0 : 1}"${t.state === 'live' ? '' : ' disabled'}>${rec ? 'Stop' : 'Record'}</button>`
+      + `<button class="btn" data-mv-remove="${esc(t.address)}" title="Stop showing it and put it back on its own Wi-Fi">Remove</button>`);
+    wanted.push(el);
+  }
+  for (const [id, el] of mvShown) if (!wanted.includes(el)) { el.remove(); mvShown.delete(id); }
+  wanted.forEach((el, i) => { if (grid.children[i] !== el) grid.insertBefore(el, grid.children[i] || null); });
+  const cands = (MV && MV.candidates) || [];
+  const full = MV && MV.tiles.length >= MV.max;
+  setHTML($('mvPick'), cands.length ? cands.map(c => `<option value="${esc(c.address)}">${esc(c.name)}${c.network ? '' : ' (no shared Wi-Fi set)'}</option>`).join('')
+    : '<option value="">No other linked cameras</option>');
+  $('mvAdd').disabled = !cands.length || full;
+  $('mvAdd').title = full ? 'Four cameras at most' : '';
+  const n = wanted.length, recording = (S && S.fresh && S.record && S.record.state === 'recording' ? 1 : 0)
+    + ((MV && MV.tiles) || []).filter(t => t.record && t.record.state === 'recording').length;
+  $('mvInfo').textContent = n ? `${plural(n, 'camera')}` + (recording ? ` · ${recording} recording` : '') : 'No camera yet';
+}
+$('mvAdd').onclick = async () => {
+  const address = $('mvPick').value;
+  if (!address) return;
+  const r = await (await fetch('/api/multiview/add', { method: 'POST', body: JSON.stringify({ address }) })).json();
+  if (!r.ok) toast(r.error, true); else activity('Multiview: adding a camera', 'info');
+  pollMultiview();
+};
+$('mvGrid').addEventListener('click', async e => {
+  const rec = e.target.closest('[data-mv-rec]'), rm = e.target.closest('[data-mv-remove]');
+  if (rec) {
+    const start = rec.dataset.on === '1';
+    const r = await (await fetch('/api/multiview/record', { method: 'POST', body: JSON.stringify({ address: rec.dataset.mvRec, start }) })).json();
+    if (!r.ok) toast(`${start ? 'Record' : 'Stop'}: ${r.error}`, true);
+  } else if (rm) {
+    await fetch('/api/multiview/remove', { method: 'POST', body: JSON.stringify({ address: rm.dataset.mvRemove }) });
+    activity('Multiview: camera removed (back on its own Wi-Fi)', 'info');
+  }
+  pollMultiview();
+});
+async function recordAll(start) {
+  const r = await (await fetch('/api/multiview/record', { method: 'POST', body: JSON.stringify({ start }) })).json();
+  if (r.results) {
+    const failed = r.results.filter(x => !x.ok);
+    const text = `${start ? 'Record' : 'Stop'} all: ${r.confirmed} of ${r.total} confirmed`
+      + (failed.length ? ' · ' + failed.map(x => `${x.name}: ${x.error}`).join(', ') : '');
+    activity(text, failed.length ? 'err' : 'ok');
+    if (failed.length) toast(text, true);
+  } else toast(r.error || 'No camera answered', true);
+  pollMultiview();
+}
+$('mvRecord').onclick = () => recordAll(true);
+$('mvStop').onclick = () => recordAll(false);
 
 async function loadMedia() {
   try { M = await (await fetch('/api/media', { cache: 'no-store' })).json(); } catch (e) { return; }
@@ -1771,7 +1918,8 @@ function renderGallery() {
   const videos = M ? M.files.filter(f => f.type === 'video').length : 0;
   $('galInfo').textContent = !M ? '—' : listing && !M.files.length ? 'Reading the gallery…'
     : `${plural(M.files.length, 'file')} · ${plural(videos, 'video')} · ${plural(M.files.length - videos, 'photo')} · ${fmtSize(total)}`
-      + (listing ? ' · reading…' : M.cached ? ' · as of last time (Refresh to read the camera)' : '');
+      + (listing ? ' · reading…' : M.cached ? ' · as of last time (Refresh to read the camera)'
+        : M.partial ? ' · the newest only: the camera did not list older files' : '');
   $('galRefresh').disabled = listing || !(S && S.link === 'on' && S.connected);
   $('galEmpty').hidden = files.length > 0;
   $('galEmpty').textContent = !M || (listing && !M.files.length) ? "Reading the camera's gallery…"

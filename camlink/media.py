@@ -41,6 +41,8 @@ CURSOR_INTERNAL = 0x40000001
 CURSOR_SD = 0x00000001
 PAGE_SIZE = 0x2D
 FILE_TYPES = {0x00: "photo", 0x03: "video"}
+EXT_TYPES = {"JPG": "photo", "JPEG": "photo", "DNG": "photo", "MP4": "video", "MOV": "video"}
+THUMB_EXTS = (".THM", ".SCR")          # the Osmo Nano's thumbnails are .THM; other models may only keep .SCR
 CHUNK_DATA, CHUNK_END = 0x01, 0x03
 
 _NAME = re.compile(rb"\x0d(.)([\x20-\x7e]{5,})", re.S)
@@ -127,7 +129,7 @@ def parse_manifest(data: bytes) -> list[dict]:
         paths = {m.group(1)[0]: m.group(2).decode("ascii", "replace") for m in _PATH.finditer(data, pos, end)}
         if 1 not in paths:
             continue
-        kind = FILE_TYPES.get(data[tag - 2], f"type{data[tag - 2]:02x}")
+        kind = FILE_TYPES.get(data[tag - 2]) or EXT_TYPES.get(ext.upper(), f"type{data[tag - 2]:02x}")
         files.append({
             "name": name,
             "path": f"{paths[1]}.{ext}" if ext else paths[1],
