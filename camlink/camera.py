@@ -154,6 +154,9 @@ STICK_CENTER, STICK_RANGE = 1024, 550    # the camera ignores values beyond ± 5
 FLIPPED_YAW = 165.0                      # past this pan angle the camera faces you: pan is mirrored
 # Zoom: lens position = 217 × factor. Stops each model offers; on the Pocket 3 the top one depends on
 # the resolution (4K 2×, 2.7K 3×, 1080p 4×); Slow-mo, Timelapse and Super Night stay at 1×.
+# Osmo Pocket 3: which way the camera faces (04/27 push, about 10 a second: byte 2 bit 0x40 = towards the
+# user, after "turn 180°") and its Selfie Flip setting (02/8E parameter 0x0038, set on the camera only).
+PARAM_SELFIE_FLIP = 0x0038
 ZOOM_UNIT = 217
 ZOOM_STOPS = {0x0020: [1, 2, 4], 0x0021: [1, 2, 4], 0x0022: [1, 3, 6, 12]}
 POCKET3_ZOOM_MAX = {0x0A: 4, 0x0C: 4, 0x42: 4, 0x69: 4, 0x2D: 3, 0x43: 3, 0x5F: 3, 0x6A: 3,

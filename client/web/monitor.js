@@ -700,15 +700,25 @@ const Monitor = (() => {
       const { width, height } = glCanvas;
       glCanvas.width = iw; glCanvas.height = ih;
       drawGL();
-      const url = glCanvas.toDataURL('image/png');   // read before the buffer is presented and cleared
+      const url = mirrored() ? flippedURL(glCanvas, iw, ih)   // read before the buffer is presented and cleared
+                             : glCanvas.toDataURL('image/png');
       glCanvas.width = width; glCanvas.height = height;
       if (!glCanvas.hidden) drawGL();
       return url;
     }
-    const canvas = document.createElement('canvas');
-    canvas.width = iw; canvas.height = ih;
-    canvas.getContext('2d').drawImage(frame, 0, 0);
+    const url = mirrored() ? flippedURL(frame, iw, ih) : flippedURL(frame, iw, ih, false);
     if (frame !== source) frame.close();
+    return url;
+  }
+
+  // The picture is mirrored on the page (the Mirror button): stills are saved as shown.
+  const mirrored = () => view.classList.contains('mirrored');
+  function flippedURL(picture, w, h, flip = true) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (flip) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(picture, 0, 0);
     return canvas.toDataURL('image/png');
   }
 

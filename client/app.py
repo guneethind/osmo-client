@@ -55,6 +55,12 @@ def _shrink(data: bytes) -> bytes | None:
         return None
 
 
+def _tested(camera: dict) -> bool:
+    """Tested with this app: by model, so that a camera linked before its model was tested shows it too."""
+    model = camera.get("model_id")
+    return model in TESTED_MODELS if model is not None else bool(camera.get("tested"))
+
+
 class Pending:
     """A command waiting for the camera's reply."""
 
@@ -154,6 +160,8 @@ class App:
             self.state.update_stores(m.payload)
         elif m.command == (0x04, 0x05):
             self.state.update_attitude(m.payload)
+        elif m.command == (0x04, 0x27):
+            self.state.update_facing(m.payload)
         elif m.command == (0x00, 0x99):
             self.state.update_topic(m.payload)
 
@@ -203,6 +211,10 @@ class App:
         # Field of view and stabilisation (02/8E parameters), when the current capture mode offers them.
         _, caps = self.state.capabilities()
         old = self.state.settings or {}
+        if self.pocket_model() == cam.POCKET3:
+            answer = self.request(0x02, 0x8E, cam.parameter_tlv_get(cam.PARAM_SELFIE_FLIP), timeout=1.5, quiet=True)
+            value = cam.parameter_value(bytes.fromhex(answer.get("reply", "")), cam.PARAM_SELFIE_FLIP)
+            settings["selfie_flip"] = bool(value) if value is not None else old.get("selfie_flip")
         for key, table, param in (("fov", "camcap_fov", cam.PARAM_FOV), ("eis", "camcap_eis", cam.PARAM_EIS)):
             settings[key] = None
             if caps.get(table):
@@ -639,6 +651,8 @@ class App:
             "gimbal": self.state.gimbal(),
             "zoom": self.state.zoom(),
             "zoom_stops": cam.zoom_stops(pocket, settings.get("resolution_code"), snap.get("capture_mode")),
+            "facing": self.state.facing_now(),
+            "selfie_flip": settings.get("selfie_flip"),
         }
         snap["home"] = self.home
         tiles = [t.snapshot() for t in list(self.tiles.values())]
@@ -657,7 +671,7 @@ class App:
         snap["active"] = None if not self.target else {
             "address": self.target, "name": known.get("name") or (heard or {}).get("name") or self.target,
             "model": known.get("model") or (heard or {}).get("model") or "DJI Osmo",
-            "tested": bool(known.get("tested", (heard or {}).get("tested"))), "known": bool(known)}
+            "tested": _tested(known or heard or {}), "known": bool(known)}
         snap["stage"] = self.stage
         snap["stage_error"] = self.stage_error
         snap["stage_note"] = self.stage_note
@@ -837,6 +851,7 @@ class App:
         known = []
         for cam_info in self.registry.public():
             info = dict(cam_info, **seen_info(cam_info["address"]))
+            info["tested"] = _tested(cam_info)
             info["active"] = cam_info["address"] == self.target
             info["connected"] = info["active"] and self.link == "on"
             known.append(info)

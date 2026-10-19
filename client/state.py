@@ -18,6 +18,8 @@ class CameraState:
         self.battery: dict | None = None
         self.stores: dict[str, dict] = {}    # 02/DC: storage by store (sd / internal), last non-zero values
         self.attitude: dict | None = None   # Osmo Pocket gimbal (04/05 push)
+        self.facing: str | None = None      # Osmo Pocket 3: "you" / "away" (04/27 push)
+        self.last_facing = 0.0
         self.last_attitude = 0.0
         self.topics: dict[str, dict] = {}   # name -> {data, count, t}
         self.caps: dict[str, object] = {}   # capability topic -> decoded table (for the current capture mode)
@@ -51,6 +53,17 @@ class CameraState:
         if attitude is not None:
             with self._lock:
                 self.attitude, self.last_attitude = attitude, time.monotonic()
+
+    def update_facing(self, payload: bytes) -> None:
+        if len(payload) > 2:
+            with self._lock:
+                self.facing = "you" if payload[2] & 0x40 else "away"
+                self.last_facing = time.monotonic()
+
+    def facing_now(self) -> str | None:
+        """Which way an Osmo Pocket 3 faces: "you" (turned 180°) or "away", while it reports it."""
+        with self._lock:
+            return self.facing if time.monotonic() - self.last_facing < 2 else None
 
     def gimbal(self) -> dict | None:
         """The gimbal's attitude while the camera reports it (Osmo Pocket)."""

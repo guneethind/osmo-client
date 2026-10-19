@@ -1,8 +1,8 @@
 # Osmo Client
 
-Control a **DJI Osmo Nano** from your computer over Wi-Fi: live view, capture modes, photo and video,
-exposure and format settings, camera status, and a gallery to preview and download your files. Runs on
-**Windows, macOS and Linux**.
+Control a **DJI Osmo Nano** or **Osmo Pocket 3** from your computer over Wi-Fi: live view, capture modes,
+photo and video, exposure and format settings, camera status, and a gallery to preview and download your
+files. Runs on **Windows, macOS and Linux**.
 
 > Unofficial and independent: not affiliated with, endorsed or sponsored by DJI. See [Legal](#legal).
 
@@ -10,7 +10,7 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 
 > **New in 1.6: Multiview (experimental).** Up to four cameras side by side, each with its live picture,
 > and record / stop on all of them at once. Tried with an Osmo Pocket 3 and an Osmo Nano.
-> The **Osmo Pocket 3** now works with a real camera: switching between it and another camera, its own
+> The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
 > **Since 1.4 (experimental): Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P),
@@ -35,8 +35,8 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 - **Monitoring tools** over the live view, as on a field monitor: histogram, waveform, RGB parade and
   vectorscope (drag each one anywhere on the picture, in the page or in full screen); false color, zebras (white or black-and-white stripes) and focus peaking; grids, frame
   guides (2.39:1, 1.85:1, 9:16…) and a center cross; a display LUT (`.cube`) applied only while the camera
-  records in a log profile, or always; save a still of the picture as shown. Keys: `H` `W` `R` `V` `F` `Z`
-  `P` `G` `L`. They work on the picture shown on the computer; nothing changes on the camera or in the
+  records in a log profile, or always; mirror the picture left to right (remembered per camera); save a still
+  of the picture as shown. Keys: `H` `W` `R` `V` `F` `Z` `P` `G` `L`, `M` to mirror. They work on the picture shown on the computer; nothing changes on the camera or in the
   recording. The LUT is for viewing only: the camera still records its log profile (D-Log M on the Osmo
   Nano) and you apply the LUT, or your own grade, when editing. Get the official LUTs from
   [DJI's LUT downloads](https://www.dji.com/lut).
@@ -84,13 +84,13 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
 to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
 speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
-from the OpenPocketCine project's notes. Used with a real Osmo Pocket 3; the Pocket 4 and 4P are not
+from the OpenPocketCine project's notes. Tested with a real Osmo Pocket 3; the Pocket 4 and 4P are not
 tested with this app yet. The Pocket 3's gallery lists its newest files (about 45): it doesn't take the
 media mode that listing older ones needs. Its thumbnails and downloads need its own Wi-Fi: on a shared
 network it doesn't send files.
 
-Other DJI Osmo cameras (Action 4/5 Pro/6) use the same protocol and may work, fully or in part; the
-commands were mapped on the Osmo Nano. The Osmo 360 is not supported.
+Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
+part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. The Osmo 360 is not supported.
 
 Need the camera as a webcam for video calls? See the companion app,
 **[OsmoCam](https://github.com/luisreysan/osmocam)**.
@@ -100,6 +100,10 @@ Need the camera as a webcam for video calls? See the companion app,
 **Gallery**: the camera's files by day, with favorites, ready to download to the computer.
 
 ![Gallery](screenshots/gallery.webp)
+
+**Multiview** (experimental): an Osmo Nano and an Osmo Pocket 3 side by side, recorded together or one by one.
+
+![Multiview: an Osmo Nano and an Osmo Pocket 3 side by side](screenshots/multiview.webp)
 
 **Preview** of a video (low-resolution proxy) before downloading it.
 

@@ -115,6 +115,7 @@
   .viewer:fullscreen { aspect-ratio: auto; width: 100vw; height: 100vh; border-radius: 0; border: 0; }
   /* monitoring tools (monitor.js) */
   .mon-layer { position: absolute; pointer-events: none; }
+  .viewer.mirrored > #view, .viewer.mirrored > .mon-layer, .mv-tile.mirrored .pic img { transform: scaleX(-1); }
   .mon-scopes { position: absolute; left: 10px; bottom: 10px; right: 10px; display: flex; flex-wrap: wrap-reverse; gap: 8px;
                 align-items: flex-end; pointer-events: none; }
   .mon-scope { margin: 0; padding: 6px 6px 4px; border-radius: 8px; background: rgba(8, 10, 13, .74);
@@ -494,6 +495,7 @@
       <span class="sep"></span>
       <button data-tool="guides" aria-pressed="false" title="Grid and frame guides (G)">Guides</button>
       <button data-tool="lut" aria-pressed="false" title="Display LUT for log profiles (L)">LUT</button>
+      <button id="monMirror" aria-pressed="false" title="Mirror the picture left to right, on this computer only: the camera records as it is (M)">Mirror</button>
       <span class="spacer"></span>
       <button id="monStill" title="Save the picture as shown (LUT and assists included) as a PNG">Save still</button>
       <button id="monMore" aria-expanded="false" title="Settings of the monitoring tools">Settings</button>
@@ -956,6 +958,7 @@ document.addEventListener('keydown', e => {
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1]);
   if (pocketKey(e, true)) return;
+  if (e.key.toLowerCase() === 'm' && !e.repeat) { toggleMirror(); return; }
   const tool = TOOL_KEYS[e.key.toLowerCase()];
   if (tool) toggleTool(tool);
 });
@@ -971,7 +974,8 @@ const isPocket = () => !!(S && S.pocket && ready());
 function stickVector() {
   let tilt = 0, pan = 0;
   for (const d of [...keysHeld, ...padHeld]) { tilt += STICK[d][0]; pan += STICK[d][1]; }
-  return [Math.max(-1, Math.min(1, tilt)) * stickGain, Math.max(-1, Math.min(1, pan)) * stickGain];
+  const side = mirrored(S && S.active && S.active.address) ? -1 : 1;   // left / right as the picture shows them
+  return [Math.max(-1, Math.min(1, tilt)) * stickGain, Math.max(-1, Math.min(1, pan)) * stickGain * side];
 }
 // While a direction is held the page repeats the stick every 150 ms; the app streams it to the camera and
 // lets go when the page stops (so a closed page never leaves the gimbal turning).
@@ -1042,7 +1046,9 @@ function renderPocket(s) {
   for (const b of $('pocketCard').querySelectorAll('button')) b.disabled = !on;
   $('gMode').disabled = $('gSpeed').disabled = !on;
   const g = pk.gimbal;
-  $('gRead').textContent = g ? `· pan ${g.pan.toFixed(0)}° · tilt ${g.tilt.toFixed(0)}°` : '';
+  $('gRead').textContent = (g ? `· pan ${g.pan.toFixed(0)}° · tilt ${g.tilt.toFixed(0)}°` : '')
+    + (pk.facing === 'you' ? ' · facing you' : '')
+    + (pk.selfie_flip == null ? '' : ` · Selfie Flip ${pk.selfie_flip ? 'on' : 'off'}`);
   if (g && g.mode && document.activeElement !== $('gMode') && $('gMode').value !== 'tilt_lock') $('gMode').value = g.mode;
   const stops = pk.zoom_stops || [];
   setHTML($('zoomStops'), stops.map(f => `<button data-factor="${f}" title="Zoom ${f}×">${f}×</button>`).join(''));
@@ -1062,6 +1068,26 @@ function renderPocket(s) {
 // ---- monitoring tools (monitor.js): scopes, assists, guides and a display LUT over the live view
 const viewer = $('view').parentElement;
 Monitor.init(viewer, $('view'));
+// ---- Mirror: the picture shown flipped left to right, on this computer only (remembered per camera; the
+// camera records as it is). Also in Multiview and in saved stills.
+const MIRROR_KEY = 'osmo-client.mirror';
+let mirrors = {};
+try { mirrors = JSON.parse(localStorage.getItem(MIRROR_KEY)) || {}; } catch (e) { mirrors = {}; }
+const mirrored = address => !!(address && mirrors[address]);
+function applyMirror() {
+  const on = mirrored(S && S.active && S.active.address);
+  viewer.classList.toggle('mirrored', on);
+  $('monMirror').setAttribute('aria-pressed', String(on));
+}
+function toggleMirror() {
+  const address = S && S.active && S.active.address;
+  if (!address) return;
+  if (mirrors[address]) delete mirrors[address]; else mirrors[address] = true;
+  try { localStorage.setItem(MIRROR_KEY, JSON.stringify(mirrors)); } catch (e) { /* private window */ }
+  applyMirror();
+  activity(mirrors[address] ? 'Picture mirrored on this computer (the camera records as it is)' : 'Picture no longer mirrored', 'info');
+}
+$('monMirror').onclick = toggleMirror;
 const TOOL_KEYS = { h: 'histogram', w: 'waveform', r: 'parade', v: 'vectorscope', f: 'falseColor', z: 'zebras',
                     p: 'peaking', g: 'guides', l: 'lut' };
 const GL_TOOLS = ['falseColor', 'zebras', 'peaking', 'lut'];
@@ -1330,7 +1356,7 @@ function camLine(c) {
 }
 function renderCams() {
   if (!CAMS) return;
-  $('camTested').textContent = `Tested only with the ${CAMS.tested_models.join(', ')}. Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 3/4) use the same protocol and may work fully or in part; the Osmo 360 does not.`;
+  $('camTested').textContent = `Tested with the ${CAMS.tested_models.join(' and ')}. Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 4/4P) use the same protocol and may work fully or in part; the Osmo 360 does not.`;
   const st = CAMS.stage, stEl = $('camStage');
   stEl.hidden = !st || st === 'on';
   stEl.className = 'cam-stage' + (st === 'error' ? ' err' : '');
@@ -1437,6 +1463,7 @@ const isRecording = () => S && S.record && S.record.state !== 'idle';
 // ---- render
 function render() {
   const s = S;
+  applyMirror();                   // the active camera's own setting
   // connection pill
   let tone = 'warn', text = 'Connecting…';
   const off = s && s.link === 'off';
@@ -1835,6 +1862,7 @@ function renderMultiview() {
   const act = S && S.active;
   if (act) {                        // the active camera first
     const el = mvTile('main', '/stream?mv');
+    el.classList.toggle('mirrored', mirrored(act.address));
     const live = S.link === 'on' && S.connected && S.video_age != null && S.video_age <= 2;
     const rec = S.fresh && S.record && S.record.state === 'recording';
     el.classList.toggle('rec', !!rec);
@@ -1848,6 +1876,7 @@ function renderMultiview() {
   }
   for (const t of (MV && MV.tiles) || []) {
     const el = mvTile(t.address, `/stream/tile/${encodeURIComponent(t.address)}`);
+    el.classList.toggle('mirrored', mirrored(t.address));
     const rec = t.record && t.record.state === 'recording';
     el.classList.toggle('rec', !!rec);
     const live = t.state === 'live' && t.video_age != null && t.video_age <= 2;
