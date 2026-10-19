@@ -211,8 +211,32 @@ The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on m
 --port 8091               port of the local page
 --no-browser              don't open the page automatically
 --no-delete               don't offer to delete files on the camera
+--report                  camera report: check the app on your camera and save a file to send
+                          (see "Test your camera" below)
 --help                    everything else
 ```
+
+## Test your camera
+
+Osmo Client is tested with an Osmo Nano and an Osmo Pocket 3. If you have another Osmo camera (Pocket 4 or
+4P, Action 4, 5 Pro or 6…), a **camera report** shows what works on it and what needs changing, so that it
+can be supported properly:
+
+1. Link the camera in the app once as usual (it should show the live view), then close the app.
+2. Start it with `--report` (Osmo Client 1.6.1 or later): `osmo-client.bat --report` on Windows,
+   `sh osmo-client.sh --report` on macOS and Linux.
+3. Once the live view is up, leave the camera and the page alone for about ten minutes. The camera switches
+   through its capture modes, formats and color profiles by itself; at the end everything is put back as it
+   was. Nothing is recorded, photographed or deleted. Keep a memory card in it and enough battery.
+4. When the console says **Camera report saved**, the folder with `osmo-client-report-….json` opens.
+   [Open a camera report](https://github.com/luisreysan/osmo-client/issues/new?template=camera-report.yml),
+   drag the file into it (zip it first if GitHub refuses it) and say what you saw.
+
+**What the report holds:** the camera model, the app's version and your system, what the camera answered to
+each setting, its status data, how its file list reads, a summary of the messages it sent, and the app's
+console output. **What it leaves out:** the camera's name and Bluetooth address, Wi-Fi names and passwords, IP
+addresses, folders on your computer, pictures, and your file names and dates (blanked). It is a text file:
+open it to check before you send it.
 
 ## Good to know
 
@@ -241,6 +265,7 @@ Code layout:
 | `osmo_client.py` | entry point: connection loop (Bluetooth → Wi-Fi → datalink) |
 | `client/app.py` | commands, settings, gallery and camera selection |
 | `client/multiview.py` | Multiview: one extra camera per tile (its own Bluetooth, network search and session) |
+| `client/report.py` | camera report (`--report`): what a camera answers to the app, saved without private data |
 | `client/state.py` | camera status parsed for the page |
 | `client/downloads.py` | download queue |
 | `client/server.py` | local web server and JSON API (127.0.0.1 only) |
@@ -287,7 +312,7 @@ camera's Wi-Fi password), and the name and password of a shared network you choo
 
 The same folder holds the app's private Python environment and, under `media`, each camera's last file
 list and thumbnails (so the gallery opens at once). Downloads go to the folder you choose. No
-telemetry.
+telemetry: a camera report (`--report`) is saved as a file for you to send, never sent by the app.
 
 ## Legal
 

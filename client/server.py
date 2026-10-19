@@ -66,7 +66,7 @@ def exposure_options(app: App) -> dict:
     formats: dict[int, list[int]] = {}
     slowmo = []
     if mode == cam.MODE_SLOWMO:
-        slowmo = [{"res": r, "fps": f, "label": cam.slowmo_label(r, f, cam.slowmo_factor(model, r, f))} for r, f in pairs]
+        slowmo = [{"res": r, "fps": f, "label": cam.slowmo_label(r, f)} for r, f in pairs]
     else:
         for r, f in pairs:
             formats.setdefault(r, []).append(f)

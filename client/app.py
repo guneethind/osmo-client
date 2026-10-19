@@ -128,6 +128,7 @@ class App:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.state_camera: str | None = None   # camera the state and gallery shown belong to
         self.tiles: dict[str, Tile] = {}       # Multiview: extra cameras, by address
+        self.tap = None                        # sees every camera message (the camera report)
 
     # ---- incoming data -------------------------------------------------------------------------
     def on_frame(self, frame, _first_packet: float = 0.0) -> None:
@@ -138,6 +139,8 @@ class App:
             self.frame_cond.notify_all()
 
     def on_message(self, m: Message) -> None:
+        if self.tap is not None:              # the camera report (--report) keeps a summary of the messages
+            self.tap(m)
         if m.is_reply:
             with self._pending_lock:
                 for pending in self._pending:
@@ -244,9 +247,9 @@ class App:
         return self.request(0x02, 0x01, b"\x01")
 
     def record(self, start: bool) -> dict:
-        """Timelapse is interval shooting: it starts and stops with take-photo (record answers DF there).
-        Every other video mode uses record."""
-        cmd_id = 0x01 if self.state.capture_mode() == cam.MODE_TIMELAPSE else 0x02
+        """Timelapse is interval shooting: on the Osmo Nano and Pocket 3 it starts and stops with take-photo
+        (record answers DF there). Every other video mode uses record (see camera.record_command)."""
+        cmd_id = cam.record_command(self.pocket_model(), self.state.capture_mode())
         return self.request(0x02, cmd_id, b"\x01" if start else b"\x00")
 
     def set_setting(self, cmd_id: int, payload: bytes) -> dict:

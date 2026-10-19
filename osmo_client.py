@@ -31,6 +31,7 @@ from camlink.protocol import CAMERA_HOST
 from camlink.registry import DEFAULT_TRANSPORT, other_transport
 from camlink.util import fine_timer, log
 from camlink.video import VideoDecoder
+from client import report
 from client.app import App
 from client.server import start_server
 from client.station import back_to_own_wifi, reach
@@ -59,6 +60,8 @@ async def run(args: argparse.Namespace) -> None:
             f"already (http://127.0.0.1:{args.port}/). Close it first, or start this one with --port")
         stop.set()
         return
+    if getattr(args, "report", False):
+        report.start(app, decoder, stop)
     if not args.no_browser:
         webbrowser.open(f"http://127.0.0.1:{args.port}/")
     home = args.home or wifi.current_network(args.interface)
@@ -350,6 +353,10 @@ def main() -> None:
     parser.add_argument("--address", help="Bluetooth address of the camera, as the page lists it (default: the "
                                           "one used last)")
     parser.add_argument("--off", action="store_true", help="start disconnected (connect from the page)")
+    parser.add_argument("--report", action="store_true",
+                        help="camera report: once connected, check what the camera answers to each of the app's "
+                             "settings (about ten minutes; everything is put back) and save a file to send to "
+                             "the author (see the README)")
     parser.add_argument("--no-browser", action="store_true", help="don't open the page in the browser")
     parser.add_argument("--downloads", help="folder for files copied from the camera (default: DJI Osmo in "
                                             "your Videos folder, Movies on macOS)")

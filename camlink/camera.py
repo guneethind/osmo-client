@@ -3,7 +3,7 @@
 All of this was verified on an Osmo Nano; the full description is in docs/PROTOCOL.md.
 
     take photo           02/01 [01]                    (photo mode)
-    timelapse start/stop 02/01 [01] / [00]             (timelapse rides take-photo)
+    timelapse start/stop 02/01 [01] / [00]             (timelapse rides take-photo; Osmo Pocket 4 / 4P: 02/02)
     record start/stop    02/02 [01] / [00]             (video, slow-mo, hyperlapse, super night)
     capture mode         02/E1 [mode]                  (see MODES)
     exposure mode        02/1E [mode, 00]              01 auto, 04 manual; read 02/1F
@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import re
 
+from .models import POCKETS
+
 # Capture modes: the value of 02/E1, also byte 57 of the 02/80 status push.
 MODES = {0x05: "Photo", 0x01: "Video", 0x28: "Super Night", 0x00: "Slow-mo", 0x02: "Timelapse", 0x0A: "Hyperlapse",
          0x17: "Photo"}                  # 0x17: Photo on the Osmo Pocket 4 / 4P
@@ -81,7 +83,7 @@ SHUTTER_SPEEDS = [0x9F40, 0x9900, 0x9388, 0x8FA0, 0x8C80, 0x89C4, 0x87D0, 0x8640
 # Video format: 02/18 [resolution, fps, 00, 00, slow-mo factor]. Frame-rate codes were checked by
 # recording and reading the files back (code 6 gives 59.94 fps). Video mode takes codes 1-6; 120 and
 # 240 fps belong to Slow-mo.
-FRAME_RATES = {1: 24, 2: 25, 3: 30, 4: 48, 5: 50, 6: 60, 7: 120, 8: 240, 0x0A: 100}
+FRAME_RATES = {1: 24, 2: 25, 3: 30, 4: 48, 5: 50, 6: 60, 7: 120, 8: 240, 0x0A: 100, 0x13: 200}
 # Resolution codes, identified by bitrate and live view frame shape. On the Osmo Nano the 4:3 codes are
 # only accepted with the aspect set to 4:3 first; a 16:9 code switches the picture back by itself. The
 # square and vertical codes are the Osmo Pocket's (OpenPocketCine's notes).
@@ -111,6 +113,7 @@ NANO_PHOTO_FORMATS = [(4, 0), (4, 1), (3, 0), (3, 1)]
 # resolution code (no 4:3; 1:1 up to 3K; 9:16 only follows the camera's own portrait lock), Low-Light
 # (0x28) offers 1080p / 4K at 24-30 fps, and Slow-mo carries its speed factor in byte 3 of 02/18.
 POCKET3 = 0x0020
+POCKET4S = {0x0021, 0x0022}               # Osmo Pocket 4 / 4P
 POCKET3_FORMATS = {
     MODE_VIDEO: {"res": [0x10, 0x2D, 0x0A, 0x6B, 0x6A, 0x69], "fps": [1, 2, 3, 4, 5, 6]},
     MODE_SUPER_NIGHT: {"res": [0x10, 0x0A], "fps": [1, 2, 3]},
@@ -279,9 +282,10 @@ def photo_label(size: int, ratio: int) -> str:
     return label + (f" · {PHOTO_MP[size, ratio]} MP" if (size, ratio) in PHOTO_MP else "")
 
 
-def slowmo_label(res: int, fps: int, factor: int | None = None) -> str:
+def slowmo_label(res: int, fps: int) -> str:
+    """As the cameras name them: 100 and 120 fps are 4× slower, 200 and 240 fps 8×."""
     rate = FRAME_RATES.get(fps, 0)
-    return f"{RESOLUTIONS.get(res, hex(res)).split()[0]} · {rate} fps · {factor or rate // 30}×"
+    return f"{RESOLUTIONS.get(res, hex(res)).split()[0]} · {rate} fps · {8 if rate >= 200 else 4}×"
 
 
 def builtin_tables(model_id: int | None) -> dict:
@@ -294,17 +298,25 @@ def builtin_tables(model_id: int | None) -> dict:
 
 
 def slowmo_factor(model_id: int | None, res: int, fps: int) -> int:
+    """The factor byte 02/18 carries in Slow-mo: 8 at 240 fps, else 4 (the Osmo Pocket 4P's 200 fps takes 4
+    too, although the camera calls it 8×)."""
     return next((x for r, f, x in builtin_tables(model_id)["slowmo"] if (r, f) == (res, fps)),
-                FRAME_RATES.get(fps, 120) // 30)
+                8 if FRAME_RATES.get(fps, 120) >= 240 else 4)
 
 
 def video_format_payload(model_id: int | None, mode: int | None, res: int, fps: int) -> bytes:
     """02/18 payload. Slow-mo adds its speed factor: in the last byte on the Osmo Nano, in byte 3 on the
-    Osmo Pocket 3."""
+    Osmo Pockets (seen on the Pocket 3 and the Pocket 4P)."""
     if mode != MODE_SLOWMO:
         return bytes((res, fps, 0, 0, 0))
     factor = slowmo_factor(model_id, res, fps)
-    return bytes((res, fps, 0, factor, 0)) if model_id == POCKET3 else bytes((res, fps, 0, 0, factor))
+    return bytes((res, fps, 0, factor, 0)) if model_id in POCKETS else bytes((res, fps, 0, 0, factor))
+
+
+def record_command(model_id: int | None, mode: int | None) -> int:
+    """Record start / stop: 02/02, except in Timelapse, which rides take-photo (02/01) on the Osmo Nano and
+    the Osmo Pocket 3; the Osmo Pocket 4 / 4P record a timelapse like a video."""
+    return 0x01 if mode == MODE_TIMELAPSE and model_id not in POCKET4S else 0x02
 
 
 def mode_name(mode: int, model_id: int | None = None) -> str:

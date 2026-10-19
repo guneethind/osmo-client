@@ -110,7 +110,7 @@ class Tile:
         mode = self.capture_mode()
         if mode in cam.PHOTO_MODES:
             return {"ok": False, "error": "in Photo mode"}
-        cmd_id = 0x01 if mode == cam.MODE_TIMELAPSE else 0x02
+        cmd_id = cam.record_command((self.app.registry.get(self.address) or {}).get("model_id"), mode)
         result = self.request(0x02, cmd_id, b"\x01" if start else b"\x00")
         log(f"Multiview {self.name}: {'record' if start else 'stop'} -> {'ok' if result['ok'] else result['error']}")
         return result

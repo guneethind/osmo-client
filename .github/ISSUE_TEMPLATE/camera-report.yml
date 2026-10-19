@@ -1,0 +1,61 @@
+name: Camera report
+description: Send the file saved by "osmo-client --report", so the app can be checked on your camera
+title: "Camera report: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you! Start the app with `--report` (see [Test your camera](https://github.com/luisreysan/osmo-client#test-your-camera)),
+        leave the camera alone for about ten minutes, then attach the `osmo-client-report-….json` file it saved.
+        You can open the file first to check it: it holds no names, addresses, Wi-Fi details, pictures or file dates.
+  - type: dropdown
+    id: camera
+    attributes:
+      label: Camera
+      options:
+        - Osmo Pocket 4
+        - Osmo Pocket 4P
+        - Osmo Pocket 3
+        - Osmo Action 6
+        - Osmo Action 5 Pro
+        - Osmo Action 4
+        - Osmo Nano
+        - Another one (say which below)
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Camera firmware
+      description: In the camera's settings (About), or in DJI's phone app.
+  - type: dropdown
+    id: system
+    attributes:
+      label: Computer
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What worked
+      options:
+        - label: It connected and showed the live view
+        - label: During the report the camera changed modes and formats by itself, and went back to its settings at the end
+        - label: The gallery showed my files with their thumbnails
+        - label: "Things I tried on the page worked (say which below: recording, photos, gimbal, zoom, Multiview…)"
+  - type: textarea
+    id: report
+    attributes:
+      label: Report file
+      description: Drag the osmo-client-report-….json file here (zip it first if GitHub refuses it).
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: What looked wrong, what the camera showed, or the app's console output if the report stopped early.
