@@ -28,7 +28,7 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   asks the camera for a fresh one and, if that is not enough, restarts the link, keeping the last picture
   on screen (marked NO VIDEO) meanwhile.
 - **Monitoring tools** over the live view, as on a field monitor: histogram, waveform, RGB parade and
-  vectorscope; false color, zebras (white or black-and-white stripes) and focus peaking; grids, frame
+  vectorscope (drag each one anywhere on the picture, in the page or in full screen); false color, zebras (white or black-and-white stripes) and focus peaking; grids, frame
   guides (2.39:1, 1.85:1, 9:16…) and a center cross; a display LUT (`.cube`) applied only while the camera
   records in a log profile, or always; save a still of the picture as shown. Keys: `H` `W` `R` `V` `F` `Z`
   `P` `G` `L`. They work on the picture shown on the computer; nothing changes on the camera or in the

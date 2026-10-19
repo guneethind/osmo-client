@@ -20,6 +20,7 @@ const Monitor = (() => {
     falseColor: false, zebras: false, peaking: false, guides: false, lut: false,
     zebraLevel: 99, zebraStyle: 'white', peakLevel: 'medium', peakColor: 'red', grid: 'thirds', frame: 'off', mask: true,
     center: false, lutMode: 'log',
+    scopePos: {},                  // scopes moved off their row: name -> [x, y], 0-1 across the room left in the picture
   };
   const prefs = { ...DEFAULTS, ...readJSON(PREFS_KEY) };
   function readJSON(key) {
@@ -46,7 +47,7 @@ const Monitor = (() => {
   const SCOPE_MS = 100;
 
   // ---- elements and state
-  let view, img, glCanvas, overlay, scopesEl, legendEl, sampler, sctx;
+  let view, img, glCanvas, overlay, scopesEl, freeEl, legendEl, sampler, sctx;
   let gl = null, glProgram = null, glUniforms = {}, srcTex = null, lutTex = null, falseTex = null;
   let lut = null;                  // { name, size, data: Float32Array }
   let live = false, logProfile = false;
@@ -55,6 +56,7 @@ const Monitor = (() => {
   let streamOn = false, streamAbort = null, decoding = false;
   let scopeTimer = null;
   const scopeCanvases = {};
+  const scopeBoxes = {};           // in their row under the picture (scopesEl), or moved (freeEl)
 
   function init(viewer, image) {
     view = viewer; img = image;
@@ -62,20 +64,29 @@ const Monitor = (() => {
     overlay = make('canvas', 'mon-layer mon-overlay'); overlay.hidden = true;
     img.after(glCanvas, overlay);
     scopesEl = make('div', 'mon-scopes'); scopesEl.hidden = true;
+    freeEl = make('div', 'mon-free'); freeEl.hidden = true;
     legendEl = make('div', 'mon-legend'); legendEl.hidden = true;
     legendEl.innerHTML = FALSE_BANDS.map(([lo, hi, c, label]) =>
       `<span><i style="background:rgb(${c})"></i>${label} <small>${lo}–${hi > 100 ? 100 : hi}</small></span>`).join('');
-    overlay.after(scopesEl, legendEl);
+    overlay.after(scopesEl, freeEl, legendEl);
     for (const [name, w, h, title] of [['histogram', 256, 120, 'Histogram'], ['waveform', 256, 128, 'Waveform'],
                                         ['parade', 255, 128, 'RGB parade'], ['vectorscope', 150, 150, 'Vectorscope']]) {
       const box = make('figure', 'mon-scope');
       box.dataset.scope = name;
+      box.title = 'Drag to move it anywhere on the picture; double-click to put it back';
       const canvas = make('canvas');
       canvas.width = w; canvas.height = h;
       const caption = make('figcaption'); caption.textContent = title;
       box.append(canvas, caption);
       scopesEl.append(box);
       scopeCanvases[name] = canvas;
+      scopeBoxes[name] = box;
+      draggable(box);
+    }
+    const stored = prefs.scopePos && typeof prefs.scopePos === 'object' ? prefs.scopePos : {};
+    prefs.scopePos = {};
+    for (const [name, pos] of Object.entries(stored)) {
+      if (scopeBoxes[name] && Array.isArray(pos) && pos.length === 2 && pos.every(Number.isFinite)) place(scopeBoxes[name], pos);
     }
     sampler = document.createElement('canvas');
     sctx = sampler.getContext('2d', { willReadFrequently: true });
@@ -92,6 +103,77 @@ const Monitor = (() => {
     if (cls) el.className = cls;
     return el;
   }
+
+  // ---- scopes the user moves: dragged anywhere over the picture. A position is kept as a fraction of
+  // the room the scope has to move in (CSS does the rest), so it holds in full screen, in the page and
+  // whatever the window size.
+  const unit = v => Math.min(Math.max(+v || 0, 0), 1);
+  function place(box, [x, y]) {
+    box.style.setProperty('--x', unit(x));
+    box.style.setProperty('--y', unit(y));
+    if (box.parentElement !== freeEl) freeEl.append(box);
+    prefs.scopePos[box.dataset.scope] = [unit(x), unit(y)];
+  }
+  function putBack(box) {
+    box.style.removeProperty('--x');
+    box.style.removeProperty('--y');
+    const names = Object.keys(scopeBoxes);    // back in its row, in the usual order
+    const next = names.slice(names.indexOf(box.dataset.scope) + 1).map(n => scopeBoxes[n])
+      .find(b => b.parentElement === scopesEl);
+    scopesEl.insertBefore(box, next || null);
+    delete prefs.scopePos[box.dataset.scope];
+  }
+  function draggable(box) {
+    // Moves are followed on the window: taking the scope out of its row moves it in the page, which ends
+    // its pointer capture (it is captured again right after).
+    let drag = null;
+    const move = e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;      // a click, not a drag (yet)
+      box.classList.add('dragging');
+      const area = freeEl.getBoundingClientRect();
+      const roomX = Math.max(area.width - box.offsetWidth, 0), roomY = Math.max(area.height - box.offsetHeight, 0);
+      const left = Math.min(Math.max(drag.left + dx - area.left, 0), roomX);
+      const top = Math.min(Math.max(drag.top + dy - area.top, 0), roomY);
+      place(box, [roomX ? left / roomX : 0, roomY ? top / roomY : 0]);
+      if (!drag.moved) {
+        drag.moved = true;
+        try { box.setPointerCapture(drag.id); } catch (err) { /* the button was released meanwhile */ }
+      }
+    };
+    const end = e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (e.type === 'pointerup') move(e);
+      if (drag.moved) { savePrefs(); changed(); }
+      box.classList.remove('dragging');
+      drag = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+    box.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || drag) return;
+      const r = box.getBoundingClientRect();
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, left: r.left, top: r.top, moved: false };
+      box.setPointerCapture(e.pointerId);
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+      e.preventDefault();
+    });
+    box.addEventListener('dblclick', e => {
+      if (box.parentElement !== freeEl) return;              // in its row: the viewer's full screen toggle
+      e.stopPropagation();
+      putBack(box); savePrefs(); changed();
+    });
+  }
+  function resetScopes() {
+    for (const box of Object.values(scopeBoxes)) if (box.parentElement === freeEl) putBack(box);
+    savePrefs(); changed();
+  }
+  const movedScopes = () => Object.keys(prefs.scopePos).length;
+  const changed = () => document.dispatchEvent(new CustomEvent('monitorchange'));
 
   // ---- public: state from the page, toggles, settings
   function update(isLive, isLog) {
@@ -118,8 +200,8 @@ const Monitor = (() => {
     overlay.hidden = !(live && prefs.guides);
     legendEl.hidden = !(live && prefs.falseColor && gl);
     const scopes = ['histogram', 'waveform', 'parade', 'vectorscope'].filter(n => prefs[n]);
-    scopesEl.hidden = !live || !scopes.length;
-    for (const box of scopesEl.children) box.hidden = !prefs[box.dataset.scope];
+    scopesEl.hidden = freeEl.hidden = !live || !scopes.length;
+    for (const box of Object.values(scopeBoxes)) box.hidden = !prefs[box.dataset.scope];
     if (scopes.length && live && !scopeTimer) scopeTimer = setInterval(drawScopes, SCOPE_MS);
     if ((!scopes.length || !live) && scopeTimer) { clearInterval(scopeTimer); scopeTimer = null; }
     const frames = !!(pixels || (live && scopes.length));
@@ -130,7 +212,7 @@ const Monitor = (() => {
       if (source) { source.close(); source = null; }
     }
     rect = null;
-    document.dispatchEvent(new CustomEvent('monitorchange'));
+    changed();
   }
 
   // ---- layout: the picture is letterboxed inside the viewer (object-fit: contain)
@@ -683,5 +765,5 @@ const Monitor = (() => {
     }).catch(() => {}).finally(() => { decoding = false; });
   }
 
-  return { init, update, toggle, set, get, glReady, loadLut, clearLut, lutName, lutActive, still };
+  return { init, update, toggle, set, get, glReady, loadLut, clearLut, lutName, lutActive, still, resetScopes, movedScopes };
 })();

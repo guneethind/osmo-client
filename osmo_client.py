@@ -37,6 +37,10 @@ from client.station import back_to_own_wifi, reach
 from client.watchdog import FeedWatchdog, start_wait
 
 
+class Changed(Exception):
+    """A connection step was given up: the page disconnected, picked another camera or changed its Wi-Fi."""
+
+
 async def run(args: argparse.Namespace) -> None:
     app = App()
     app.loop = asyncio.get_running_loop()
@@ -74,6 +78,27 @@ async def run(args: argparse.Namespace) -> None:
     def wanted() -> bool:
         return app.want_link.is_set() and app.target is not None
 
+    def changed() -> bool:
+        return not wanted() or app.target_changed.is_set() or app.reconnect.is_set() or stop.is_set()
+
+    async def unless_changed(step, given_up: threading.Event):
+        """Run a connection step, but give it up as soon as changed(): a camera joining a network can take
+        minutes, and switching it back to its own Wi-Fi must not wait for that. `given_up` is set then, for
+        the step's threads (a network search), which cancelling does not stop."""
+        task = asyncio.ensure_future(step)
+        try:
+            while not task.done():
+                if changed():
+                    raise Changed
+                await asyncio.wait({task}, timeout=0.25)
+            return task.result()
+        finally:
+            if not task.done():
+                given_up.set()
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+
     async def pause(seconds: float) -> None:
         """Sleep, but wake early if the page disconnects, picks another camera, or we quit."""
         end = time.monotonic() + seconds
@@ -85,14 +110,18 @@ async def run(args: argparse.Namespace) -> None:
         await back_to_own_wifi(link, app.registry, station)
         station = False
 
-    async def reach_on_network(target: str, network: str, port: int) -> str:
+    async def reach_on_network(target: str, network: str, port: int, given_up: threading.Event) -> str:
         """Station mode: the computer stays on its own network and the camera joins `network`."""
         nonlocal joined, station
         if joined:                   # coming from the camera's own access point
             await asyncio.to_thread(wifi.restore, home, args.interface)
             joined = False
-        station = True
-        return await reach(link, app.registry, target, network, port, app.set_stage, pause, wanted)
+        try:
+            return await reach(link, app.registry, target, network, port, app.set_stage, pause,
+                               lambda: not given_up.is_set() and not changed(), note=app.set_stage_note)
+        finally:
+            # put it back on its own Wi-Fi later only if it was asked to join (or found on the network)
+            station = bool((app.registry.get(target) or {}).get("in_station"))
 
     async def release() -> None:
         nonlocal link, joined
@@ -147,7 +176,10 @@ async def run(args: argparse.Namespace) -> None:
                 transport = (known or {}).get("transport") or dict(DEFAULT_TRANSPORT)
                 network = (known or {}).get("network")
                 if network:
-                    host = await reach_on_network(target, network, transport.get("port", datalink.DATALINK_PORT))
+                    given_up = threading.Event()
+                    host = await unless_changed(
+                        reach_on_network(target, network, transport.get("port", datalink.DATALINK_PORT), given_up),
+                        given_up)
                 else:
                     await own_wifi()     # it was on a shared network until now
                     host = CAMERA_HOST
@@ -159,6 +191,10 @@ async def run(args: argparse.Namespace) -> None:
                 app.camera_host = app.downloader.host = host
                 if transport.get("poke", True):
                     await asyncio.to_thread(datalink.poke, host)
+            except Changed:
+                log("Stopped trying: " + ("the camera's Wi-Fi setting changed" if app.reconnect.is_set()
+                                          else "disconnected, or another camera picked"))
+                continue                 # the next round reads the new setting (and puts the camera back)
             except Exception as error:  # noqa: BLE001 - keep trying until the camera is back (Ctrl+C quits)
                 app.set_stage("error", str(error))
                 if link is not None:
@@ -166,11 +202,13 @@ async def run(args: argparse.Namespace) -> None:
                     with contextlib.suppress(Exception):
                         await link.close()
                 link = None
-                if isinstance(error, wifi.NoWifi):
-                    # The computer can't join the camera's access point, now or later: the camera can join
-                    # a network the computer is on instead (Ethernet to the router is fine).
-                    app.set_stage("error", f"{error}. Have the camera join a network this computer is on "
-                                           "instead: Cameras, then Wi-Fi → Change")
+                if isinstance(error, (wifi.NoWifi, ble.JoinRefused)):
+                    # Trying again can't help. No Wi-Fi on the computer: the camera can join a network the
+                    # computer is on instead (Ethernet to the router is fine). The camera refused the shared
+                    # network: the message says what to check.
+                    if isinstance(error, wifi.NoWifi):
+                        app.set_stage("error", f"{error}. Have the camera join a network this computer is on "
+                                               "instead: Cameras, then Wi-Fi → Change")
                     log(f"Could not connect: {error}")
                     app.want_link.clear()
                     continue

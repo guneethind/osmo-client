@@ -83,6 +83,7 @@ class App:
         self.scanning = False
         self.stage: str | None = None
         self.stage_error: str | None = None
+        self.stage_note: str | None = None     # progress within the current step (network join attempts...)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.state_camera: str | None = None   # camera the state and gallery shown belong to
 
@@ -556,6 +557,7 @@ class App:
             "tested": bool(known.get("tested", (heard or {}).get("tested"))), "known": bool(known)}
         snap["stage"] = self.stage
         snap["stage_error"] = self.stage_error
+        snap["stage_note"] = self.stage_note
         return snap
 
     # ---- cameras -------------------------------------------------------------------------------
@@ -617,7 +619,7 @@ class App:
             return {"ok": False, "error": seen["unsupported"]}
         if self.registry.get(address) is None and seen is None:
             return {"ok": False, "error": "camera not found: turn it on, bring it closer and search again"}
-        self.stage, self.stage_error = None, None
+        self.set_stage(None)
         if self.target != address:
             self.target = address
             self.target_changed.set()
@@ -637,7 +639,9 @@ class App:
                 return {"ok": False, "error": f"type the password of “{ssid}”"}
         self.registry.set_network(address, ssid, password)
         if address == self.target:
+            self.set_stage(None)
             self.reconnect.set()
+            self.want_link.set()             # "Save and reconnect", also after giving up (a refused network)
         return {"ok": True}
 
     def forget(self, address: str) -> None:
@@ -649,7 +653,10 @@ class App:
             self.target_changed.set()
 
     def set_stage(self, stage: str | None, error: str | None = None) -> None:
-        self.stage, self.stage_error = stage, error
+        self.stage, self.stage_error, self.stage_note = stage, error, None
+
+    def set_stage_note(self, note: str | None) -> None:
+        self.stage_note = note
 
     def cameras_snapshot(self) -> dict:
         now = time.monotonic()
@@ -670,6 +677,6 @@ class App:
         nearby = [dict(n, **seen_info(a)) for a, n in sorted(self.nearby.items(), key=lambda i: -i[1]["rssi"])
                   if a not in known_ids and (now - n["t"] <= 20 or a == self.target)]
         return {"target": self.target, "known": known, "nearby": nearby, "scanning": self.scanning,
-                "stage": self.stage, "stage_error": self.stage_error, "link": self.link,
+                "stage": self.stage, "stage_error": self.stage_error, "stage_note": self.stage_note, "link": self.link,
                 "networks": self.registry.network_names(), "home": self.home,
                 "tested_models": [MODELS[m] for m in sorted(TESTED_MODELS)]}

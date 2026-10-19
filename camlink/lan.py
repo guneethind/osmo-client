@@ -13,14 +13,18 @@ import ipaddress
 import socket
 import threading
 import time
+from collections.abc import Callable
 
 from .datalink import Datalink, poke
-from .protocol import ADDR_WIFI, DATALINK_PORT, POKE_PORT
+from .protocol import ADDR_WIFI, CAMERA_HOST, DATALINK_PORT, POKE_PORT
 from .util import log
 from .wifi import local_ip_towards
 
 
 HOTSPOT_PREFIX = "192.168.137."   # Windows Mobile Hotspot
+# More hosts than this answering on TCP 7001 is not cameras: a virtual adapter (WSL, Hyper-V) or software
+# that accepts every connection. Such a network is skipped rather than asking each host who it is.
+MAX_CANDIDATES = 8
 
 
 def local_addresses() -> list[str]:
@@ -100,26 +104,44 @@ def identify(host: str, port: int = DATALINK_PORT, timeout: float = 8.0) -> str 
 
 
 def find_camera(identity: str, hint: str | None = None, port: int = DATALINK_PORT,
-                skip: set[str] | frozenset[str] = frozenset()) -> str | None:
+                skip: set[str] | frozenset[str] = frozenset(),
+                keep_going: Callable[[], bool] = lambda: True) -> str | None:
     """Address of the camera whose identity is `identity` on the local networks, or None. `hint` (where it
-    was last time) is tried first; then each local network, the most likely first. Addresses in `skip`
-    (cameras this computer is already streaming from) are left alone."""
+    was last time) is tried first; then each local network, the most likely first, its hosts asked all at
+    once. Addresses in `skip` (cameras this computer is already streaming from) are left alone, and so is
+    a camera's own access point (CAMERA_HOST): a computer still on the camera's Wi-Fi finds it there, but it
+    has not joined the shared network (on a router's network the router itself holds that address).
+    Gives up between networks once `keep_going()` is false."""
     own = local_addresses()
     tried: set[str] = set(skip)
 
-    def check(host: str) -> bool:
-        tried.add(host)
-        name = identify(host, port)
-        if name == identity:
-            log(f"Found {identity} at {host}")
-            return True
-        log(f"{host} is " + (f"another camera ({name})" if name else "not a camera that answers"))
-        return False
-
-    if hint and hint not in own and hint not in tried and _open(hint, POKE_PORT, 0.8) and check(hint):
-        return hint
-    for address in own:
-        for host in candidates(address, own):
-            if host not in tried and check(host):
+    def check(hosts: list[str]) -> str | None:
+        tried.update(hosts)
+        with concurrent.futures.ThreadPoolExecutor(len(hosts)) as pool:
+            names = list(pool.map(lambda h: identify(h, port), hosts))
+        for host, name in zip(hosts, names):
+            if name == identity:
+                log(f"Found {identity} at {host}")
                 return host
+            log(f"{host} is " + (f"another camera ({name})" if name else "not a camera that answers"))
+        return None
+
+    if hint and hint != CAMERA_HOST and hint not in own and hint not in tried:
+        if _open(hint, POKE_PORT, 0.8) and check([hint]):
+            return hint
+    for address in own:
+        if not keep_going():
+            return None
+        hosts = candidates(address, own)
+        if CAMERA_HOST in hosts:
+            log(f"{CAMERA_HOST} is a camera's own access point, not the shared network")
+        hosts = [h for h in hosts if h != CAMERA_HOST and h not in tried]
+        if len(hosts) > MAX_CANDIDATES:
+            log(f"Skipped the network around {address}: {len(hosts)} addresses answer, so they are not cameras "
+                "(a virtual adapter, or software that accepts every connection)")
+            continue
+        if hosts and keep_going():
+            found = check(hosts)
+            if found:
+                return found
     return None

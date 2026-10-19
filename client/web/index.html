@@ -102,7 +102,7 @@
   .veil { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px;
           background: radial-gradient(ellipse at center, rgba(20, 23, 28, .86), rgba(8, 9, 11, .94)); }
   .veil h2 { margin: 12px 0 4px; font-size: 17px; font-weight: 600; }
-  .veil p { margin: 0; color: var(--muted); max-width: 420px; }
+  .veil p { margin: 0; color: var(--muted); max-width: 420px; white-space: pre-line; }
   .spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--border-2); border-top-color: var(--accent);
              animation: spin .9s linear infinite; margin: 0 auto; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -118,7 +118,13 @@
   .mon-scopes { position: absolute; left: 10px; bottom: 10px; right: 10px; display: flex; flex-wrap: wrap-reverse; gap: 8px;
                 align-items: flex-end; pointer-events: none; }
   .mon-scope { margin: 0; padding: 6px 6px 4px; border-radius: 8px; background: rgba(8, 10, 13, .74);
-               border: 1px solid rgba(255, 255, 255, .08); }
+               border: 1px solid rgba(255, 255, 255, .08); pointer-events: auto; cursor: grab; touch-action: none;
+               user-select: none; }
+  .mon-scope.dragging { cursor: grabbing; border-color: rgba(255, 255, 255, .3); }
+  /* scopes moved by the user: --x / --y (0-1) place them anywhere in the room left over the picture */
+  .mon-free { position: absolute; inset: 10px; pointer-events: none; }
+  .mon-free .mon-scope { position: absolute; left: calc(var(--x) * 100%); top: calc(var(--y) * 100%);
+                         transform: translate(calc(var(--x) * -100%), calc(var(--y) * -100%)); }
   .mon-scope canvas { display: block; width: clamp(150px, 20cqw, 256px); height: auto; }
   .mon-scope[data-scope=vectorscope] canvas { width: clamp(110px, 12cqw, 150px); }
   .mon-scope figcaption { margin-top: 3px; font-size: 10px; color: var(--muted); letter-spacing: .05em; text-transform: uppercase; }
@@ -301,7 +307,8 @@
               background: var(--border-2); color: var(--muted); margin-left: 6px; vertical-align: 1px; }
   .tag-mini.ok { background: rgba(48, 209, 88, .16); color: var(--ok); }
   .tag-mini.warn { background: rgba(255, 214, 10, .14); color: var(--warn); }
-  .cam-stage { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+  .cam-stage { margin: 4px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px;
+               white-space: pre-line; }
   .cam-stage.err { color: var(--danger); }
   .cams .empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
   .cam-row .net { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
@@ -313,6 +320,11 @@
   .cam-net .choice small { grid-column: 2; color: var(--muted); font-size: 12px; }
   .cam-net .field { margin: 4px 0 4px 24px; }
   .cam-net .row { display: flex; gap: 8px; margin-top: 10px; }
+  .pass { position: relative; }
+  .field .pass input { padding-right: 36px; }
+  .pass .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+  .pass .eye-off, .pass.shown .eye { display: none; }
+  .pass.shown .eye-off { display: block; }
 
   /* tabs */
   .tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface);
@@ -492,6 +504,8 @@
             <option value="1:1">1:1</option><option value="4:5">4:5</option><option value="9:16">9:16</option></select>
           <label for="mMask">Darken outside</label><input type="checkbox" id="mMask">
           <label for="mCenter">Center cross</label><input type="checkbox" id="mCenter">
+          <label>Scopes</label>
+          <span><button class="btn" id="mScopesBack" title="Scopes can be dragged anywhere on the picture; this puts them back in their row">Put back in place</button></span>
         </div>
         <div class="field">
           <label>LUT</label><span class="mon-lut" id="mLutName">None loaded</span>
@@ -713,7 +727,12 @@
         <small>The camera joins your router or this computer's hotspot, and the computer keeps its own connection.</small></label>
       <div class="field" id="netFields">
         <label for="netSsid">Network</label><input type="text" id="netSsid" list="netList" autocomplete="off" spellcheck="false">
-        <label for="netPass">Password</label><input type="password" id="netPass" autocomplete="off">
+        <label for="netPass">Password</label>
+        <div class="pass"><input type="password" id="netPass" autocomplete="off">
+          <button type="button" class="icon-btn" id="netShow" aria-pressed="false" aria-label="Show password" title="Show password">
+            <svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.6 9.6 0 0 1 12 5c6.4 0 10 7 10 7a17.4 17.4 0 0 1-3.2 4.2M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+          </button></div>
       </div>
       <datalist id="netList"></datalist>
       <p class="note" id="netNote">Networks with WPA2 (or WPA2/WPA3) work; the Osmo Nano refuses networks that only allow
@@ -1034,6 +1053,7 @@ $('mLutFile').onchange = async e => {
   else activity(`LUT loaded: ${Monitor.lutName()}` + (problem ? ` (${problem})` : ''), 'ok');
 };
 $('mLutClear').onclick = () => Monitor.clearLut();
+$('mScopesBack').onclick = () => Monitor.resetScopes();
 function renderAssists() {
   const gl = Monitor.glReady();
   for (const b of $('assists').querySelectorAll('[data-tool]')) {
@@ -1051,6 +1071,7 @@ function renderAssists() {
   for (const [id, [key]] of Object.entries(MON_SELECTS)) if (document.activeElement !== $(id)) $(id).value = String(Monitor.get(key));
   $('mMask').checked = !!Monitor.get('mask');
   $('mCenter').checked = !!Monitor.get('center');
+  $('mScopesBack').disabled = !Monitor.movedScopes();
 }
 document.addEventListener('monitorchange', renderAssists);
 renderAssists();
@@ -1214,7 +1235,7 @@ const STAGES = {
   credentials: 'Asking for its Wi-Fi details…',
   wifi: 'Joining the camera’s Wi-Fi…',
   datalink: 'Opening the link to the camera…',
-  station: 'Asking the camera to join the network (this takes about 20 s)…',
+  station: 'Asking the camera to join the network (this can take up to a minute)…',
   lan: 'Looking for the camera on the network…',
 };
 const POWER = { awake: 'on', asleep: 'asleep', unknown: 'nearby' };
@@ -1260,7 +1281,7 @@ function renderCams() {
   stEl.hidden = !st || st === 'on';
   stEl.className = 'cam-stage' + (st === 'error' ? ' err' : '');
   stEl.textContent = st === 'error' ? 'Could not connect: ' + (CAMS.stage_error || 'error') + (CAMS.link === 'connecting' ? ' · retrying…' : '')
-    : (STAGES[st] || '');
+    : [STAGES[st], CAMS.stage_note].filter(Boolean).join('\n');   // the step, then its progress
   const untested = c => c.tested ? '' : '<span class="tag-mini warn">untested</span>';
   setHTML($('camKnown'), CAMS.known.length ? CAMS.known.map(c => `
     <div class="cam-row${c.active ? ' active' : ''}">
@@ -1292,6 +1313,7 @@ function openNetwork(address) {
   for (const r of document.getElementsByName('netMode')) r.checked = r.value === (cam.network ? 'shared' : 'own');
   $('netSsid').value = cam.network || CAMS.networks[0] || CAMS.home || '';
   $('netPass').value = '';
+  showPassword(false);
   $('netList').innerHTML = [...new Set([...CAMS.networks, CAMS.home].filter(Boolean))].map(n => `<option value="${esc(n)}">`).join('');
   syncNetwork();
   $('camNet').hidden = false;
@@ -1303,6 +1325,15 @@ function syncNetwork() {
   $('netPass').placeholder = saved ? 'saved (type to change)' : '';
 }
 for (const r of document.getElementsByName('netMode')) r.onchange = syncNetwork;
+function showPassword(on) {
+  $('netPass').type = on ? 'text' : 'password';
+  $('netPass').parentElement.classList.toggle('shown', on);
+  const label = on ? 'Hide password' : 'Show password';
+  $('netShow').setAttribute('aria-pressed', on);
+  $('netShow').setAttribute('aria-label', label);
+  $('netShow').title = label;
+}
+$('netShow').onclick = () => showPassword($('netPass').type === 'password');
 $('netSsid').oninput = syncNetwork;
 $('netCancel').onclick = () => { $('camNet').hidden = true; netFor = null; };
 $('netSave').onclick = async () => {
@@ -1384,7 +1415,8 @@ function render() {
   else if (select) veil = ['Choose a camera', 'Find and link a DJI Osmo camera nearby (turn it on and bring it close to the computer).', false];
   else if (s.stage === 'approve') veil = ['Approve “OSMO” on the camera', 'The camera asks for permission to link with this computer: confirm it on its screen.', true];
   else if (s.stage === 'error' && !s.connected) veil = ['Could not connect', s.stage_error || 'Retrying…', true];
-  else if (!s.connected) veil = ['Connecting to ' + (act ? act.name : 'the camera') + '…', STAGES[s.stage] || 'Pairing over Bluetooth and joining its Wi-Fi network.', true];
+  else if (!s.connected) veil = ['Connecting to ' + (act ? act.name : 'the camera') + '…',
+    [STAGES[s.stage] || 'Pairing over Bluetooth and joining its Wi-Fi network.', s.stage_note].filter(Boolean).join('\n'), true];
   else if (s.media_state === 'listing') veil = ['Reading the gallery…', 'The live view comes back in a few seconds.', true];
   else if (s.downloads_active && s.playback) veil = [`Downloading ${plural(s.downloads_active, 'file')} to the computer…`,
     'The live view comes back when it finishes: without it the camera sends files about 6 times faster and stays cooler.', true];

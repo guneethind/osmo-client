@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Awaitable, Callable
 
 from camlink import lan
@@ -11,29 +12,38 @@ from camlink.ble import BleLink
 from camlink.registry import CameraRegistry
 from camlink.util import log
 
+# After joining, a camera can take about a minute to show up on a router's network.
+JOINED_SEARCH = 90.0
+
 
 async def reach(link: BleLink, registry: CameraRegistry, address: str, network: str, port: int,
                 stage: Callable[[str], None], pause: Callable[[float], Awaitable[None]],
-                keep_going: Callable[[], bool], in_use: Callable[[], set[str]] = set) -> str:
+                keep_going: Callable[[], bool], in_use: Callable[[], set[str]] = set,
+                note: Callable[[str | None], None] = lambda _note: None) -> str:
     """The camera's address on `network`. Look for it there first (it may still be on it, at its last
     address), otherwise ask it over BLE to join, then look again. Raises when it can't be reached.
-    `in_use()`: addresses of the other cameras this computer streams from (never probed)."""
+    `in_use()`: addresses of the other cameras this computer streams from (never probed). `note(text)`:
+    progress for the page (join attempts, the search after the join). The searches stop early once
+    `keep_going()` is false (they run in threads, which cancelling the caller does not stop)."""
     known = registry.get(address) or {}
     stage("lan")
-    host = await asyncio.to_thread(lan.find_camera, link.ssid, known.get("host"), port, in_use())
+    host = await asyncio.to_thread(lan.find_camera, link.ssid, known.get("host"), port, in_use(), keep_going)
     if host is None:
         password = registry.network_password(network)
         if password is None:
             raise RuntimeError(f"No password saved for “{network}”: set the network again (Cameras)")
         stage("station")
         registry.mark_station(address, True)
-        await link.join_network(network, password)
+        joined = await link.join_network(network, password, progress=note)
         stage("lan")
-        for _ in range(4):           # getting an address on the network can take the camera a while
+        started = time.monotonic()
+        while time.monotonic() - started < JOINED_SEARCH:   # getting an address can take it a while
+            note(("The camera joined" if joined else "No answer from the camera, but it may have joined")
+                 + f" “{network}”: looking for it there (it can take a minute)")
             await pause(4)
             if not keep_going():
                 break
-            host = await asyncio.to_thread(lan.find_camera, link.ssid, None, port, in_use())
+            host = await asyncio.to_thread(lan.find_camera, link.ssid, None, port, in_use(), keep_going)
             if host:
                 break
     if host is None:
