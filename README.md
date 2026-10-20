@@ -13,9 +13,9 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
-> **Since 1.4 (experimental): Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P),
-> gimbal and zoom controls. The Pocket 4 and 4P are **not tested with a real camera yet**: reports are
-> welcome.
+> **Since 1.4: Osmo Pocket 3, 4 and 4P.** Live view (H.265 on the Pocket 4 and 4P), gimbal and zoom
+> controls. The **Pocket 3 is tested** with a real camera; the Pocket 4 and 4P are still experimental (not
+> tested with a real one yet): a [camera report](#test-your-camera) helps.
 >
 > **Since 1.3: a field monitor.** Scopes, false color, zebras, focus peaking, frame guides and a display
 > LUT over the live view; exposure compensation and the camera's light meter; color profile (D-Log M),
@@ -80,7 +80,7 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 - **Day and night themes**: the sun / moon button in the header switches the page between light and dark.
   Until you use it, the page follows your system setting. The live view and the media viewer stay dark.
 
-**Osmo Pocket 3, 4 and 4P (experimental):** the live view (H.265 on the Pocket 4 and 4P) and, only
+**Osmo Pocket 3, 4 and 4P** (the 4 and 4P experimental): the live view (H.265 on the Pocket 4 and 4P) and, only
 while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the arrow keys; Shift: faster)
 to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
 speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
