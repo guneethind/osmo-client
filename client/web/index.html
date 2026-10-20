@@ -608,13 +608,14 @@
       <div class="field">
         <label for="eIso">ISO</label><select id="eIso" disabled><option value="" hidden>—</option></select>
         <label for="eShutter">Shutter</label><select id="eShutter" disabled><option value="" hidden>—</option></select>
-        <label for="eWb">White balance</label><select id="eWb" disabled><option value="" hidden>—</option></select>
+        <label for="eWb">White balance</label><select id="eWb" disabled title="White balance is the colour of the light you are in: the camera evens it out. A lower value makes the picture cooler (bluer), a higher one warmer."><option value="" hidden>—</option></select>
         <label for="eEv">EV</label><select id="eEv" disabled><option value="" hidden>—</option></select>
       </div>
       <div class="meter" id="eMeter" hidden title="The camera's own light meter: how far the picture is from the exposure it considers correct">
         <span>−3</span><div class="scale"><i id="eNeedle"></i></div><span>+3</span>
       </div>
       <p class="note" id="eNote">Reading the camera's exposure…</p>
+      <p class="note" id="wbNote" hidden>White balance is the colour of the light you are in: the camera evens it out. A lower value makes the picture cooler (bluer), a higher one warmer.</p>
     </div>
 
     <div class="card">
@@ -1088,6 +1089,9 @@ function toggleMirror() {
   activity(mirrors[address] ? 'Picture mirrored on this computer (the camera records as it is)' : 'Picture no longer mirrored', 'info');
 }
 $('monMirror').onclick = toggleMirror;
+// White balance: the light sources the usual colour temperatures stand for.
+const WB_LIGHTS = { 2800: 'Tungsten', 4000: 'Fluorescent', 5600: 'Daylight', 6500: 'Cloudy', 7500: 'Shade' };
+const wbLabel = k => nf.format(k) + ' K' + (WB_LIGHTS[k] ? ' · ' + WB_LIGHTS[k] : '');
 const TOOL_KEYS = { h: 'histogram', w: 'waveform', r: 'parade', v: 'vectorscope', f: 'falseColor', z: 'zebras',
                     p: 'peaking', g: 'guides', l: 'lut' };
 const GL_TOOLS = ['falseColor', 'zebras', 'peaking', 'lut'];
@@ -1584,7 +1588,7 @@ function render() {
   if (OPTS) {
     fillSelect($('eIso'), OPTS.iso.map(o => [o.code, isoLabel(o)]), 'iso' + OPTS.key);
     fillSelect($('eShutter'), OPTS.shutter.map(o => [o.raw, secs(o.label)]), 'shutter' + OPTS.key);
-    fillSelect($('eWb'), [['auto', 'Auto'], ...OPTS.wb_kelvin.map(k => [k, nf.format(k) + ' K'])], 'wb' + OPTS.key);
+    fillSelect($('eWb'), [['auto', 'Auto'], ...OPTS.wb_kelvin.map(k => [k, wbLabel(k)])], 'wb' + OPTS.key);
   }
   syncSelect($('eIso'), manual ? set.iso_code : null,
     manual ? (set.iso ? nf.format(set.iso) : `code ${set.iso_code}`) : auto ? 'Auto' : '—',
@@ -1596,8 +1600,9 @@ function render() {
     : 'In Auto the camera picks ISO and shutter (EV shifts its target). Switch to Manual to set them.';
   // white balance (works with Auto exposure too)
   syncSelect($('eWb'), set && set.wb === 'auto' ? 'auto' : set && set.wb === 'manual' ? set.wb_kelvin : null,
-    set && set.wb ? (set.wb === 'auto' ? 'Auto' : set.wb_kelvin ? nf.format(set.wb_kelvin) + ' K' : set.wb) : '—',
+    set && set.wb ? (set.wb === 'auto' ? 'Auto' : set.wb_kelvin ? wbLabel(set.wb_kelvin) : set.wb) : '—',
     !ready() || busy || !set || !OPTS);
+  $('wbNote').hidden = !(set && set.wb === 'manual');
   // exposure compensation (Auto only) and the camera's own light meter, from its exposure topic
   const evNow = ex && ex.ev != null ? ex.ev : null;
   if (OPTS) fillSelect($('eEv'), OPTS.ev.map(o => [o.thirds, o.label]), 'ev' + OPTS.key);
