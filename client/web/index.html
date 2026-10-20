@@ -349,6 +349,7 @@
   .mv-tile .head span { color: var(--muted); white-space: nowrap; }
   .mv-tile .head .rec-dot { color: var(--rec); font-weight: 700; }
   .mv-tile .head .btn { padding: 3px 10px; }
+  .mv-tile .head .mv-mode { padding: 2px 6px; font-size: 13px; max-width: 9.5em; }
   .mv-add { display: flex; gap: 8px; align-items: center; }
   .mv-add select { font: inherit; font-size: 13px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-2);
                    border-radius: 8px; padding: 5px 8px; max-width: 260px; }
@@ -724,9 +725,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2h10V19H3z"/></svg>Open folder</button>
   </div>
   <div class="gal-note" id="galNote" hidden role="status">
-    <span>This camera doesn't send files over a shared Wi-Fi network, so its thumbnails and downloads can't be
-      shown here. Switch it to its own Wi-Fi to see them (the computer then joins the camera's Wi-Fi; Ethernet keeps
-      your internet).</span>
+    <span><b>The gallery needs the camera's own Wi-Fi.</b> This camera is on a shared Wi-Fi network, where it lists
+      its files but sends no thumbnails or downloads. Switch it to its own Wi-Fi to see and download them (the
+      computer then joins the camera's Wi-Fi; Ethernet keeps your internet). Multiview needs the shared network
+      again afterwards: Cameras → Wi-Fi → Change.</span>
     <button class="btn primary" id="galOwnWifi">Switch to its own Wi-Fi</button>
   </div>
   <div class="card gal-dl" id="galDl" hidden>
@@ -1862,6 +1864,13 @@ function mvTile(id, src) {
   }
   return el;
 }
+function mvModeMenu(address, code, modes, enabled) {   // each camera's capture mode, changed from its tile
+  if (!modes || !modes.length) return '';
+  const list = modes.some(m => m.code === code) || code == null ? modes : modes.concat([{ code, name: `0x${code.toString(16)}` }]);
+  return `<select class="mv-mode" data-mv-mode="${esc(address)}" title="Capture mode"${enabled && code != null ? '' : ' disabled'}>`
+    + (code == null ? '<option value="">Mode…</option>' : '')
+    + list.map(m => `<option value="${m.code}"${m.code === code ? ' selected' : ''}>${esc(m.name)}</option>`).join('') + '</select>';
+}
 function renderMultiview() {
   const grid = $('mvGrid'), wanted = [];
   const act = S && S.active;
@@ -1875,8 +1884,10 @@ function renderMultiview() {
     el.querySelector('.msg').textContent = S.link === 'off' ? 'Disconnected'
       : S.link === 'on' ? 'Waiting for the picture…' : S.stage_note || STAGES[S.stage] || 'Connecting…';
     setHTML(el.querySelector('.head'), `<b>${esc(act.name)}</b><span>active</span><span class="spacer"></span>`
-      + (rec ? `<span class="rec-dot num">● ${clock(S.record.elapsed)}</span>` : `<span>${esc(S.capture_mode_name || '')}</span>`)
-      + (S.battery ? `<span class="num">${S.battery.percent} %</span>` : ''));
+      + (rec ? `<span class="rec-dot num">● ${clock(S.record.elapsed)}</span>`
+        : mvModeMenu(act.address, S.fresh ? S.capture_mode : null, MV && MV.active_modes, S.link === 'on' && S.connected))
+      + (S.battery ? `<span class="num">${S.battery.percent} %</span>` : '')
+      + `<button class="btn" data-mv-rec="${esc(act.address)}" data-on="${rec ? 0 : 1}"${S.link === 'on' && S.connected ? '' : ' disabled'}>${rec ? 'Stop' : 'Record'}</button>`);
     wanted.push(el);
   }
   for (const t of (MV && MV.tiles) || []) {
@@ -1889,7 +1900,7 @@ function renderMultiview() {
     el.querySelector('.msg').textContent = t.state === 'error' ? 'Could not connect: ' + (t.error || '') + ' · retrying…'
       : t.note || STAGES[t.stage] || (t.state === 'live' ? 'Waiting for the picture…' : 'Connecting…');
     setHTML(el.querySelector('.head'), `<b>${esc(t.name)}</b><span>${esc(t.host || '')}</span><span class="spacer"></span>`
-      + (rec ? `<span class="rec-dot num">● ${clock(t.record.elapsed)}</span>` : `<span>${esc(t.mode || '')}</span>`)
+      + (rec ? `<span class="rec-dot num">● ${clock(t.record.elapsed)}</span>` : mvModeMenu(t.address, t.mode_code, t.modes, t.state === 'live'))
       + (t.battery != null ? `<span class="num">${t.battery} %</span>` : '')
       + `<button class="btn" data-mv-rec="${esc(t.address)}" data-on="${rec ? 0 : 1}"${t.state === 'live' ? '' : ' disabled'}>${rec ? 'Stop' : 'Record'}</button>`
       + `<button class="btn" data-mv-remove="${esc(t.address)}" title="Stop showing it and put it back on its own Wi-Fi">Remove</button>`);
@@ -1914,6 +1925,15 @@ $('mvAdd').onclick = async () => {
   if (!r.ok) toast(r.error, true); else activity('Multiview: adding a camera', 'info');
   pollMultiview();
 };
+$('mvGrid').addEventListener('change', async e => {
+  const sel = e.target.closest('[data-mv-mode]');
+  if (!sel || sel.value === '') return;
+  sel.disabled = true;
+  const r = await (await fetch('/api/multiview/mode', { method: 'POST', body: JSON.stringify({ address: sel.dataset.mvMode, mode: +sel.value }) })).json();
+  if (!r.ok) toast(`Mode: ${r.error}`, true);
+  sel.closest('.head').dataset.html = '';         // redraw it from the camera's own state
+  pollMultiview();
+});
 $('mvGrid').addEventListener('click', async e => {
   const rec = e.target.closest('[data-mv-rec]'), rm = e.target.closest('[data-mv-remove]');
   if (rec) {

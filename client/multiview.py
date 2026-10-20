@@ -40,6 +40,7 @@ class Tile:
         self.note: str | None = None         # progress within a step (network join attempts, the search)
         self.error: str | None = None
         self.status: dict | None = None      # last 02/80 push
+        self.video_grace = 0.0               # monotonic(): a mode change pauses the video until then
         self.last_status = 0.0
         self.battery: dict | None = None
         self.host: str | None = None
@@ -105,21 +106,39 @@ class Tile:
     def capture_mode(self) -> int | None:
         return self.status["capture_mode"] if self.status else None
 
+    def model_id(self) -> int | None:
+        return (self.app.registry.get(self.address) or {}).get("model_id")
+
+    def set_mode(self, mode: int) -> dict:
+        self.video_grace = time.monotonic() + 4
+        result = self.request(0x02, 0xE1, bytes((mode,)))
+        log(f"Multiview {self.name}: mode {cam.mode_name(mode, self.model_id())} -> "
+            + ("ok" if result["ok"] else result["error"]))
+        return result
+
     def record(self, start: bool) -> dict:
-        """Start or stop recording (timelapse rides take-photo, as on the active camera)."""
+        """Start or stop recording (timelapse rides take-photo, as on the active camera). A camera left in
+        Photo mode is switched to Video first."""
         mode = self.capture_mode()
-        if mode in cam.PHOTO_MODES:
-            return {"ok": False, "error": "in Photo mode"}
-        cmd_id = cam.record_command((self.app.registry.get(self.address) or {}).get("model_id"), mode)
+        if start and mode in cam.PHOTO_MODES:
+            switched = self.set_mode(cam.MODE_VIDEO)
+            if not switched["ok"]:
+                return {"ok": False, "error": f"in Photo mode, and switching to Video failed ({switched['error']})"}
+            end = time.monotonic() + 3
+            while time.monotonic() < end and self.capture_mode() in cam.PHOTO_MODES:
+                time.sleep(0.1)
+            mode = cam.MODE_VIDEO
+        cmd_id = cam.record_command(self.model_id(), mode)
         result = self.request(0x02, cmd_id, b"\x01" if start else b"\x00")
         log(f"Multiview {self.name}: {'record' if start else 'stop'} -> {'ok' if result['ok'] else result['error']}")
         return result
 
     # ---- session
     def _in_use(self) -> set[str]:
-        """Addresses of the other cameras this computer streams from: never probed while searching."""
+        """Addresses of the other cameras this computer streams from: never probed while searching (also
+        while the active one reconnects: probing it would get in its way)."""
         hosts = {t.host for t in list(self.app.tiles.values()) if t is not self and t.host}
-        if self.app.link == "on":
+        if self.app.want_link.is_set() and self.app.camera_host:
             hosts.add(self.app.camera_host)
         return hosts
 
@@ -184,25 +203,36 @@ class Tile:
                                     on_message=self.on_message, liveview=models.liveview_mode(known.get("model_id")))
         self.decoder.reset()
         self.session = session
+        decoded, errors = self.decoder.frames, self.decoder.errors
         task = asyncio.ensure_future(asyncio.to_thread(session.run))
         watchdog: FeedWatchdog | None = None   # from the live view request (a handshake can take seconds)
+        reported = time.monotonic()
+
+        def video() -> str:
+            return (f"decoded {self.decoder.frames - decoded}, decode errors {self.decoder.errors - errors}; "
+                    + session.pictures_summary())
+
         try:
             while not task.done() and not self.closing:
                 await asyncio.sleep(0.3)
                 now = time.monotonic()
+                if datalink.DUMP_DIR and now - reported >= 10:
+                    reported = now
+                    log(f"Diagnostics {self.name}: {video()}")
                 if self.last_frame > now - 1:
                     self.state, self.error, self.stage = "live", None, "on"
                 if not session.ready.is_set() or session.stopped.is_set():
                     continue
                 if watchdog is None:
                     watchdog = FeedWatchdog(STALL, now, start_wait(quiet))
-                step = watchdog.check(now, session.last_video, self.last_frame, 0.0,
+                step = watchdog.check(now, session.last_video, self.last_frame, self.video_grace,
                                       session.frames.truncated if session.frames else 0)
                 if step == "keyframe":
                     with contextlib.suppress(OSError):
                         session.request_keyframe()
                 elif step == "restart":
-                    log(f"Multiview {self.name}: no video, restarting the session ({session.summary()})")
+                    log(f"Multiview {self.name}: no video, restarting the session ({session.summary()}; "
+                        f"decoded {self.decoder.frames - decoded}, decode errors {self.decoder.errors - errors})")
                     session.stop()
         finally:
             self.session = None
@@ -233,7 +263,9 @@ class Tile:
             "stage": self.stage, "note": self.note, "error": self.error, "host": self.host,
             "record": None if not status else {"state": cam.RECORD_STATES[status["record_state"]],
                                                 "elapsed": status["elapsed"]},
-            "mode": None if not status else cam.MODES.get(status["capture_mode"]),
+            "mode": None if not status else cam.mode_name(status["capture_mode"], known.get("model_id")),
+            "mode_code": None if not status else status["capture_mode"],
+            "modes": cam.multiview_modes(known.get("model_id")),
             "battery": self.battery["percent"] if self.battery else None,
             "video_age": round(now - self.last_frame, 1) if self.last_frame else None,
         }

@@ -417,6 +417,23 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
                     self._json(app.record_all(start))
                 elif address in app.tiles:
                     self._json(app.tiles[address].record(start))
+                elif address == app.target:
+                    self._json(app.record_video(start))   # the active camera's own button
+                else:
+                    self._bad("that camera is not in Multiview")
+            elif path == "/api/multiview/mode":
+                try:
+                    body = self._body()
+                    address, mode = str(body["address"]).upper(), int(body["mode"])
+                except (ValueError, KeyError, TypeError):
+                    self._bad("expected {address, mode}")
+                    return
+                if mode not in cam.MODES:
+                    self._bad("unknown capture mode")
+                elif address in app.tiles:
+                    self._json(app.tiles[address].set_mode(mode))
+                elif address == app.target:
+                    self._json(app.set_capture_mode(mode))
                 else:
                     self._bad("that camera is not in Multiview")
             elif path == "/api/cameras/scan":

@@ -187,7 +187,9 @@ async def run(args: argparse.Namespace) -> None:
                 # Pair again whenever BLE dropped (camera asleep, off, restarted) or another camera was
                 # picked: pairing is also what wakes the camera's Wi-Fi.
                 if link is None or link.disconnected.is_set() or link.address != target:
-                    if link is not None:
+                    if link is not None and link.address != target:
+                        await release()  # another camera picked: the previous one goes back to its own Wi-Fi
+                    elif link is not None:
                         await link.close()
                     link = ble.BleLink()
                     link.on_topic = lambda payload: app.state.update_topic(payload)  # app.state is replaced per camera
@@ -265,11 +267,16 @@ async def run(args: argparse.Namespace) -> None:
             app.datalink = session
             app.state.connected = True
             task = asyncio.ensure_future(asyncio.to_thread(session.run))
-            started = time.monotonic()
+            started = reported = time.monotonic()
+            decoded, errors = decoder.frames, decoder.errors
             watchdog: FeedWatchdog | None = None   # from the live view request (a handshake can take seconds)
             while not task.done() and not stop.is_set():
                 await asyncio.sleep(0.3)
                 now = time.monotonic()
+                if datalink.DUMP_DIR and now - reported >= 10:
+                    reported = now
+                    log(f"Diagnostics (active camera): decoded {decoder.frames - decoded}, decode errors "
+                        f"{decoder.errors - errors}; {session.pictures_summary()}")
                 if (session.last_video or app.state.last_status > started) and app.link != "on":
                     app.link = "on"
                     app.set_stage("on")
@@ -293,7 +300,8 @@ async def run(args: argparse.Namespace) -> None:
                             session.request_keyframe()
                     elif step == "restart":
                         waited = "" if session.last_video else f" in {now - watchdog.started:.0f} s"
-                        log(f"No video{waited}, restarting the session ({session.summary()})")
+                        log(f"No video{waited}, restarting the session ({session.summary()}; decoded "
+                            f"{decoder.frames - decoded}, decode errors {decoder.errors - errors})")
                         app.recovery = "Restarting the video link…"
                         session.stop()
             app.datalink = None

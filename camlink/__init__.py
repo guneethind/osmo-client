@@ -16,4 +16,4 @@ Unofficial and independent; not affiliated with DJI. The protocol is described i
     lan        finding a camera that joined a shared Wi-Fi network (station mode)
 """
 
-__version__ = "1.6.1"
+__version__ = "1.6.2"

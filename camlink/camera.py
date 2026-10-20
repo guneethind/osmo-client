@@ -325,6 +325,13 @@ def mode_name(mode: int, model_id: int | None = None) -> str:
     return MODES.get(mode, f"0x{mode:02x}")
 
 
+def multiview_modes(model_id: int | None) -> list[dict]:
+    """The capture modes Multiview offers for a camera (its own Photo code)."""
+    photo = 0x17 if model_id in POCKET4S else 0x05
+    return [{"code": m, "name": mode_name(m, model_id)}
+            for m in (MODE_VIDEO, MODE_SLOWMO, MODE_TIMELAPSE, MODE_HYPERLAPSE, MODE_SUPER_NIGHT, photo)]
+
+
 def match_rate(value: float, table: list[tuple[float, str]]) -> str | None:
     """Closest label within 2 %; both labels when the table can't tell two apart."""
     hits = sorted((abs(value - ref) / ref, label) for ref, label in table)

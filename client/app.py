@@ -6,7 +6,6 @@ import asyncio
 import collections
 import concurrent.futures
 import io
-import socket
 import threading
 import time
 import urllib.error
@@ -239,6 +238,7 @@ class App:
                     log(f"Reading the settings failed: {error}")
 
     def set_capture_mode(self, mode: int) -> dict:
+        self.video_grace = max(self.video_grace, time.monotonic() + 4)   # a mode change pauses the video
         result = self.request(0x02, 0xE1, bytes((mode,)))
         self.settings_due.set()           # each capture mode keeps its own exposure
         return result
@@ -251,6 +251,18 @@ class App:
         (record answers DF there). Every other video mode uses record (see camera.record_command)."""
         cmd_id = cam.record_command(self.pocket_model(), self.state.capture_mode())
         return self.request(0x02, cmd_id, b"\x01" if start else b"\x00")
+
+    def record_video(self, start: bool) -> dict:
+        """Record from Multiview: a camera left in Photo mode is switched to Video first."""
+        if start and self.state.capture_mode() in cam.PHOTO_MODES:
+            switched = self.set_capture_mode(cam.MODE_VIDEO)
+            if not switched.get("ok"):
+                return {"ok": False, "error": f"in Photo mode, and switching to Video failed ({switched.get('error')})"}
+            end = time.monotonic() + 3
+            while time.monotonic() < end and self.state.capture_mode() in cam.PHOTO_MODES:
+                time.sleep(0.1)
+            log("Active camera: it was in Photo mode, switched to Video to record")
+        return self.record(start)
 
     def set_setting(self, cmd_id: int, payload: bytes) -> dict:
         # a setting change can pause the camera's encoder for a moment: don't treat it as a stall
@@ -389,15 +401,21 @@ class App:
             return None, "not available"
         # Without an accepted reply the list may still come (a lost reply): wait for it a little.
         deadline = time.monotonic() + (10 if answer.get("ok") else 2)
+        end_at = None                          # when the end chunk came (it can come before the data)
+        complete = False
         with self._media_cond:
             while time.monotonic() < deadline:
-                if any(kind == media.CHUNK_END for kind, _ in self._media_chunks.get(counter, {})):
+                chunks = self._media_chunks.get(counter, {})
+                if end_at is None and any(kind == media.CHUNK_END for kind, _ in chunks):
+                    end_at = time.monotonic()
+                complete = media.page_complete(chunks, end_at is not None and time.monotonic() - end_at > 1.0)
+                if complete:
                     break
-                self._media_cond.wait(0.3)
+                self._media_cond.wait(0.1)
             page = self._media_chunks.pop(counter, {})
         if not page and not answer.get("ok"):
             return None, answer.get("error", "no reply")
-        if not any(kind == media.CHUNK_END for kind, _ in page):
+        if not complete:
             return None, "the camera did not finish sending the list"
         data = b"".join(page[k]["data"] for k in sorted(k for k in page if k[0] == media.CHUNK_DATA))
         return media.parse_manifest(data) if data else [], None
@@ -456,7 +474,7 @@ class App:
             for f in result:
                 f["stamp"] = media.capture_time(f["name"]) or f["date"]
             self.media.update(state="idle", files=result, stores=stores, updated=time.time(), cached=False,
-                              partial=partial, note=self._files_note())
+                              partial=partial)
             self._save_media()
             log(f"Media library: {len(result)} files (" + ", ".join(f"{k}: {v}" for k, v in stores.items()) + ")")
             return {"ok": True, "count": len(result), "stores": stores}
@@ -468,19 +486,6 @@ class App:
                 self.request(0x02, 0x0C, cam.LEAVE_MEDIA)
                 self.video_grace = time.monotonic() + 8
             self._media_lock.release()
-
-    def _files_note(self) -> str | None:
-        """On a shared network: why thumbnails and downloads can't work there (the Osmo Pocket 3 refuses
-        connections to its file server), else None."""
-        if self.camera_host == CAMERA_HOST:
-            return None
-        try:
-            socket.create_connection((self.camera_host, 80), timeout=2).close()
-        except ConnectionRefusedError:
-            return media.NO_FILES_ON_NETWORK
-        except OSError:
-            pass
-        return None
 
     def refresh_media(self) -> dict:
         if self.media["state"] == "listing":
@@ -539,7 +544,8 @@ class App:
         return {"state": self.media["state"], "error": self.media["error"], "updated": self.media["updated"],
                 "stores": self.media["stores"], "files": files, "folder": str(dl.folder),
                 "cached": bool(self.media.get("cached")), "partial": bool(self.media.get("partial")),
-                "note": self.media.get("note") if self.camera_host != CAMERA_HOST else None,
+                # on a shared network the gallery needs the camera's own Wi-Fi (thumbnails, downloads)
+                "note": media.NO_FILES_ON_NETWORK if self.camera_host != CAMERA_HOST else None,
                 "can_delete": self.allow_delete}
 
     def _save_media(self) -> None:
@@ -594,13 +600,12 @@ class App:
 
     def _fetch_file(self, storage: int, path: str) -> bytes | None:
         """A small camera file (a thumbnail) over HTTP, None when it isn't there. Raises ConnectionRefusedError
-        on a shared network where the camera sends no files (and notes it for the gallery)."""
+        on a shared network where the camera sends no files."""
         try:
             with urllib.request.urlopen(media.http_url(storage, path, self.camera_host), timeout=6) as response:
                 return response.read()
         except (urllib.error.URLError, OSError) as error:
             if media.refused(error) and self.camera_host != CAMERA_HOST:
-                self.media["note"] = media.NO_FILES_ON_NETWORK
                 raise ConnectionRefusedError from None
             return None
 
@@ -772,7 +777,9 @@ class App:
         candidates = [{"address": c["address"], "name": c.get("name") or c["address"], "model": c.get("model"),
                        "network": c.get("network")}
                       for c in self.registry.public() if c["address"] != self.target and c["address"] not in self.tiles]
-        return {"tiles": [t.snapshot() for t in list(self.tiles.values())], "candidates": candidates, "max": MAX_EXTRA}
+        model_id = (self.registry.get(self.target) or {}).get("model_id")
+        return {"tiles": [t.snapshot() for t in list(self.tiles.values())], "candidates": candidates, "max": MAX_EXTRA,
+                "active_modes": cam.multiview_modes(model_id)}
 
     def add_tile(self, address: str) -> dict:
         address = address.upper()
@@ -815,7 +822,7 @@ class App:
         """Start or stop recording on the active camera and every live extra one at the same time. Each
         result is the camera's own reply; nothing is repeated."""
         name = (self.registry.get(self.target) or {}).get("name") or "Active camera"
-        jobs = [(name, lambda: self.record(start))] if self.datalink is not None else []
+        jobs = [(name, lambda: self.record_video(start))] if self.datalink is not None else []
         jobs += [(t.name, lambda t=t: t.record(start)) for t in list(self.tiles.values()) if t.state == "live"]
         if not jobs:
             return {"ok": False, "error": "no camera is connected"}

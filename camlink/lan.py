@@ -15,7 +15,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from .datalink import Datalink, poke
+from .datalink import DUMP_DIR, Datalink, poke
 from .protocol import ADDR_WIFI, CAMERA_HOST, DATALINK_PORT, POKE_PORT
 from .util import log
 from .wifi import local_ip_towards
@@ -100,6 +100,8 @@ def identify(host: str, port: int = DATALINK_PORT, timeout: float = 8.0) -> str 
     finally:
         link.stop()
         thread.join(2)
+        if DUMP_DIR:
+            log(f"Diagnostics: identity check of {host}: {link.pictures_summary()}")
     return names[0] if names else None
 
 
@@ -118,7 +120,9 @@ def find_camera(identity: str, hint: str | None = None, port: int = DATALINK_POR
     def check(hosts: list[str]) -> str | None:
         tried.update(hosts)
         with concurrent.futures.ThreadPoolExecutor(len(hosts)) as pool:
-            names = list(pool.map(lambda h: identify(h, port), hosts))
+            names = list(pool.map(lambda h: identify(h, port) if keep_going() else None, hosts))
+        if not keep_going():
+            return None
         for host, name in zip(hosts, names):
             if name == identity:
                 log(f"Found {identity} at {host}")

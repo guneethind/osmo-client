@@ -46,6 +46,10 @@ FILE_TYPES = {0x00: "photo", 0x03: "video"}
 EXT_TYPES = {"JPG": "photo", "JPEG": "photo", "DNG": "photo", "MP4": "video", "MOV": "video"}
 THUMB_EXTS = (".THM", ".SCR")          # the Osmo Nano's thumbnails are .THM; other models may only keep .SCR
 CHUNK_DATA, CHUNK_END = 0x01, 0x03
+# Bytes 2-3 of a chunk: its length with the 10-byte sub-header (bits 0-11); 0x1000 marks the last data chunk
+# of the list. The end chunk can arrive before the data (an Osmo Pocket 3 sends it first, then repeats it
+# every 0.2 s), so a page is complete when its last data chunk and every one before it arrived.
+CHUNK_LAST = 0x1000
 
 _NAME = re.compile(rb"\x0d(.)([\x20-\x7e]{5,})", re.S)
 _PATH = re.compile(rb"\x1a.\x00\x00\x00([\x01\x02])([\x20-\x7e]{3,})\x00", re.S)
@@ -64,7 +68,19 @@ def parse_chunk(payload: bytes) -> dict | None:
     if len(payload) < 10 or payload[0] != 0x4A:
         return None
     return {"type": payload[1], "counter": int.from_bytes(payload[4:6], "little"),
-            "seq": int.from_bytes(payload[6:8], "little"), "data": payload[10:]}
+            "seq": int.from_bytes(payload[6:8], "little"), "data": payload[10:],
+            "last": payload[1] == CHUNK_DATA and bool(int.from_bytes(payload[2:4], "little") & CHUNK_LAST)}
+
+
+def page_complete(chunks: dict, end_settled: bool) -> bool:
+    """Whether the chunks of one list page ({(type, seq): chunk}) are all there: the last data chunk and every
+    one before it. `end_settled`: the end chunk came a while ago, so a page without a marked last chunk (or
+    without any data: an empty page) is taken as it is."""
+    numbered = {seq for kind, seq in chunks if kind != CHUNK_END}    # the end chunk always says 0
+    last = [c["seq"] for (kind, _seq), c in chunks.items() if kind == CHUNK_DATA and c.get("last")]
+    if last:
+        return numbered >= set(range(max(last) + 1))
+    return end_settled and numbered == set(range(len(numbered)))
 
 
 def _fat_time(value: int) -> str | None:
@@ -158,8 +174,8 @@ def parse_manifest(data: bytes) -> list[dict]:
 
 # On a shared network the Osmo Pocket 3 refuses connections to its file server (it serves files only on its
 # own access point).
-NO_FILES_ON_NETWORK = ("this camera doesn't send files over a shared Wi-Fi network: to see thumbnails and "
-                       "download, switch it to its own Wi-Fi (Cameras → Wi-Fi → Change)")
+NO_FILES_ON_NETWORK = ("the gallery needs the camera's own Wi-Fi: over a shared network it lists its files but "
+                       "sends no thumbnails or downloads. Switch it to its own Wi-Fi (Cameras → Wi-Fi → Change)")
 
 
 def refused(error: BaseException) -> bool:

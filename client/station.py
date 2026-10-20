@@ -26,8 +26,14 @@ async def reach(link: BleLink, registry: CameraRegistry, address: str, network: 
     progress for the page (join attempts, the search after the join). The searches stop early once
     `keep_going()` is false (they run in threads, which cancelling the caller does not stop)."""
     known = registry.get(address) or {}
+
+    def avoid() -> set[str]:
+        # the other cameras this computer streams from, and where the other cameras put on a shared
+        # network were last seen: never probed (an identity check would end their own session)
+        return set(in_use()) | registry.station_hosts(address)
+
     stage("lan")
-    host = await asyncio.to_thread(lan.find_camera, link.ssid, known.get("host"), port, in_use(), keep_going)
+    host = await asyncio.to_thread(lan.find_camera, link.ssid, known.get("host"), port, avoid(), keep_going)
     if host is None:
         password = registry.network_password(network)
         if password is None:
@@ -43,7 +49,10 @@ async def reach(link: BleLink, registry: CameraRegistry, address: str, network: 
             await pause(4)
             if not keep_going():
                 break
-            host = await asyncio.to_thread(lan.find_camera, link.ssid, None, port, in_use(), keep_going)
+            if link.disconnected.is_set():
+                # it restarted or went away: it is not on the network either, so pair again rather than search
+                raise RuntimeError("The camera dropped its Bluetooth link while joining the network; connecting again")
+            host = await asyncio.to_thread(lan.find_camera, link.ssid, None, port, avoid(), keep_going)
             if host:
                 break
     if host is None:

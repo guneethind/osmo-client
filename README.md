@@ -9,7 +9,10 @@ files. Runs on **Windows, macOS and Linux**.
 The app runs locally and opens its page in your browser at <http://127.0.0.1:8091>.
 
 > **New in 1.6: Multiview (experimental).** Up to four cameras side by side, each with its live picture,
-> and record / stop on all of them at once. Tried with an Osmo Pocket 3 and an Osmo Nano.
+> and record / stop on all of them at once. Tried with an Osmo Pocket 3 and an Osmo Nano. **1.6.2** makes
+> two cameras on a shared network much steadier (a lost command no longer freezes a camera; the Osmo
+> Pocket 3's picture comes back after a reconnect), adds a Record button and a capture-mode menu to every
+> tile, and fixes an Osmo Pocket 3 gallery that sometimes listed no files.
 > The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
@@ -72,9 +75,10 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
   WPA2 (the Osmo Nano refuses WPA3-only ones); guest networks that keep devices apart don't work. When you
   disconnect, the camera goes back to its own Wi-Fi.
 - **Multiview (experimental)**: up to four cameras side by side (the active one and three more on a shared
-  Wi-Fi network), each with its live picture, recording state and battery; record or stop one, or all of
-  them at once (a shared command, not frame-accurate sync). Removing a camera, or Disconnect, puts it back
-  on its own Wi-Fi.
+  Wi-Fi network), each with its live picture, recording state, battery, a Record button and a capture-mode
+  menu; record or stop one, or all of them at once (a shared command, not frame-accurate sync). A camera
+  left in Photo mode is switched to Video when you record from Multiview. Removing a camera, or
+  Disconnect, puts it back on its own Wi-Fi.
 - **Disconnect** button: releases the camera (so the phone app or the dock can use it) and puts your
   computer back on its own Wi-Fi without closing the app.
 - **Day and night themes**: the sun / moon button in the header switches the page between light and dark.
@@ -85,9 +89,8 @@ while a Pocket is connected, a **Gimbal & zoom** card: hold the arrows (or the a
 to pan and tilt, recenter (`C`), turn 180°, gimbal mode (Follow, Tilt locked, FPV, Direction lock) and
 speed; zoom with the 1×/2×/4× buttons (1×/3×/6×/12× on the 4P) or hold − / + (keys `-` `+`). Built
 from the OpenPocketCine project's notes. Tested with a real Osmo Pocket 3; the Pocket 4 and 4P are not
-tested with this app yet. The Pocket 3's gallery lists its newest files (about 45): it doesn't take the
-media mode that listing older ones needs. Its thumbnails and downloads need its own Wi-Fi: on a shared
-network it doesn't send files.
+tested with this app yet. The Pocket 3's thumbnails and downloads need its own Wi-Fi: on a shared network
+it lists its files but doesn't send them (the Gallery says so, with a button to switch).
 
 Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
 part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. The Osmo 360 is not supported.
@@ -298,6 +301,12 @@ Code layout:
   password are in `cameras.json` (see [Privacy](#privacy)). The app carries on once you are connected.
 - **Linux, "Insufficient privileges"** when joining the camera: your user may not change network
   settings; ask your administrator, or join the camera's network yourself.
+- **The live view freezes, stays black or keeps restarting**: start the app with the environment variable
+  `OSMO_VIDEO_DUMP` set to a folder (PowerShell: `$env:OSMO_VIDEO_DUMP = "$HOME\osmo-dump"` before
+  `.\osmo-client.bat`; macOS and Linux: `OSMO_VIDEO_DUMP=~/osmo-dump sh osmo-client.sh`). Each camera
+  session is then saved there packet by packet, and the console says every 10 s how many pictures arrived
+  and were decoded. Attach the console output and the folder (zipped) to an issue. The files hold what the
+  camera sent and received on the network (its name and IP address, never Wi-Fi passwords).
 
 ## Privacy
 
