@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import signal
 import sys
 import threading
 import time
@@ -45,6 +46,8 @@ class Changed(Exception):
 async def run(args: argparse.Namespace) -> None:
     app = App()
     app.loop = asyncio.get_running_loop()
+    if sys.platform != "win32":      # `kill` stops like Ctrl+C (on Linux, BlueZ would keep the camera's link)
+        app.loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     if args.downloads:
         app.downloader.base = Path(args.downloads)
     stop = threading.Event()
@@ -329,7 +332,7 @@ async def run(args: argparse.Namespace) -> None:
             if not stop.is_set():
                 await pause(1)
     except asyncio.CancelledError:
-        log("Ctrl+C: stopping...")
+        log("Stopping...")
         raise
     finally:
         # End the live view session first: its thread would otherwise keep Python from exiting.
@@ -379,7 +382,7 @@ def main() -> None:
     try:
         with fine_timer():
             asyncio.run(run(parser.parse_args()))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 
 

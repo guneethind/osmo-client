@@ -12,7 +12,9 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > and record / stop on all of them at once. Tried with an Osmo Pocket 3 and an Osmo Nano. **1.6.2** makes
 > two cameras on a shared network much steadier (a lost command no longer freezes a camera; the Osmo
 > Pocket 3's picture comes back after a reconnect), adds a Record button and a capture-mode menu to every
-> tile, and fixes an Osmo Pocket 3 gallery that sometimes listed no files.
+> tile, and fixes an Osmo Pocket 3 gallery that sometimes listed no files. **1.6.3** shows the **Osmo
+> Action 4**'s live view (H.265; before, it linked but never showed a picture), and on Linux stops cleanly
+> on `kill` and finds a camera again after the app was killed.
 > The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
@@ -93,7 +95,9 @@ tested with this app yet. The Pocket 3's thumbnails and downloads need its own W
 it lists its files but doesn't send them (the Gallery says so, with a button to switch).
 
 Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
-part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. The Osmo 360 is not supported.
+part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. An Osmo Action 4 links and reports
+its status (a tester's report), and its live view (H.265) works since 1.6.3, checked against a recording of
+its stream; its settings are not checked yet. The Osmo 360 is not supported.
 
 Need the camera as a webcam for video calls? See the companion app,
 **[OsmoCam](https://github.com/luisreysan/osmocam)**.
@@ -301,6 +305,9 @@ Code layout:
   password are in `cameras.json` (see [Privacy](#privacy)). The app carries on once you are connected.
 - **Linux, "Insufficient privileges"** when joining the camera: your user may not change network
   settings; ask your administrator, or join the camera's network yourself.
+- **Linux, camera "not found over Bluetooth" after the app was killed**: BlueZ kept the camera's Bluetooth
+  link, so the camera stopped advertising. Since 1.6.3 the app drops that link itself; before, run
+  `bluetoothctl disconnect <camera address>`.
 - **The live view freezes, stays black or keeps restarting**: start the app with the environment variable
   `OSMO_VIDEO_DUMP` set to a folder (PowerShell: `$env:OSMO_VIDEO_DUMP = "$HOME\osmo-dump"` before
   `.\osmo-client.bat`; macOS and Linux: `OSMO_VIDEO_DUMP=~/osmo-dump sh osmo-client.sh`). Each camera
