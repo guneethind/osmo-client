@@ -367,13 +367,15 @@ class App:
         """Resolution + frame rate for the current capture mode (slow-mo adds its speed factor). The camera
         restarts its encoder, so the live view pauses for a few seconds: tell the session watchdog. On the Osmo
         Nano a 4:3 resolution needs the aspect switched to 4:3 first; the Osmo Pockets carry the aspect in
-        the resolution code. The Osmo Action 4 refuses the aspect setting (E3) and takes the format alone."""
+        the resolution code. The Osmo Action 4 refuses the aspect setting (E3) and takes every format alone, 4:3
+        too, so it gets none; another camera that refuses it gets the format anyway."""
         self.video_grace = time.monotonic() + 12
         mode = self.state.capture_mode()
         model = (self.registry.get(self.target) or {}).get("model_id")
         # A 16:9 code switches the Nano's picture back by itself but leaves its aspect setting at 4:3, so
         # in Video mode set the aspect explicitly either way.
-        if mode != cam.MODE_SLOWMO and model not in POCKETS and (res in cam.RES_4_3 or mode == cam.MODE_VIDEO):
+        if (mode != cam.MODE_SLOWMO and model not in POCKETS and model != cam.ACTION4
+                and (res in cam.RES_4_3 or mode == cam.MODE_VIDEO)):
             aspect = self.request(0x02, 0x8E, cam.parameter_tlv_set(cam.ASPECT_TLV, 1 if res in cam.RES_4_3 else 2))
             if not aspect.get("ok") and (model == NANO or "code" not in aspect):   # not refused: no reply
                 return aspect

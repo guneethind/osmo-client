@@ -123,6 +123,22 @@ POCKET3_FORMATS = {
 POCKET3_SLOWMO = [(0x10, 0x0A, 4), (0x10, 7, 4), (0x2D, 7, 4), (0x0A, 7, 4), (0x0A, 8, 8)]
 POCKET3_PHOTO_FORMATS = [(0, 1), (0, 3)]
 POCKET3_COLOR_MODES = [0x00, 0x3C, 0x3D]       # Normal, HLG, D-Log M (Video and Slow-mo)
+# The Osmo Action 4 publishes no format tables either. Its choices, from its manual and a tester's camera
+# reports: 4:3 at 4K and 2.7K only (the Nano's codes, no aspect write), Video up to 120 fps at 4K and 2.7K
+# 16:9 and 240 fps at 1080p (above 60 fps from the manual, not checked yet), Hyperlapse at 30 fps only, and
+# one photo size (about 10 MP) in 4:3 or 16:9. Slow-mo is the Nano's. "fps_by_res" overrides a mode's frame
+# rates for one resolution.
+ACTION4 = 0x0014
+_ACTION4_FAST = [1, 2, 3, 4, 5, 6, 0x0A, 7]
+ACTION4_FORMATS = {
+    MODE_VIDEO: {"res": [0x10, 0x2D, 0x0A, 0x67, 0x5F], "fps": [1, 2, 3, 4, 5, 6],
+                 "fps_by_res": {0x10: _ACTION4_FAST, 0x2D: _ACTION4_FAST, 0x0A: [*_ACTION4_FAST, 0x13, 8],
+                                0x67: [1, 2, 3, 4, 5, 6]}},
+    MODE_SUPER_NIGHT: {"res": [0x10, 0x2D, 0x0A], "fps": [1, 2, 3]},
+    MODE_TIMELAPSE: {"res": [0x10, 0x2D, 0x0A], "fps": [2, 3]},
+    MODE_HYPERLAPSE: {"res": [0x10, 0x2D, 0x0A], "fps": [3]},
+}
+ACTION4_PHOTO_FORMATS = [(0, 0), (0, 1)]
 # White balance: 02/2C [mode, kelvin / 100, 00, 00, 00]; mode 0 = auto, 6 = manual colour temperature.
 WB_AUTO, WB_MANUAL = 0x00, 0x06
 WB_KELVIN = range(2000, 10001, 100)
@@ -289,11 +305,14 @@ def slowmo_label(res: int, fps: int) -> str:
 
 
 def builtin_tables(model_id: int | None) -> dict:
-    """What to offer when the camera publishes no table of its own: the Osmo Pocket 3's, else the Osmo
-    Nano's."""
+    """What to offer when the camera publishes no table of its own: the Osmo Pocket 3's or the Osmo
+    Action 4's, else the Osmo Nano's."""
     if model_id == POCKET3:
         return {"formats": POCKET3_FORMATS, "slowmo": POCKET3_SLOWMO, "photo": POCKET3_PHOTO_FORMATS,
                 "colors": POCKET3_COLOR_MODES}
+    if model_id == ACTION4:
+        return {"formats": ACTION4_FORMATS, "slowmo": SLOWMO_FORMATS, "photo": ACTION4_PHOTO_FORMATS,
+                "colors": []}
     return {"formats": MODE_FORMATS, "slowmo": SLOWMO_FORMATS, "photo": NANO_PHOTO_FORMATS, "colors": []}
 
 

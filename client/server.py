@@ -33,7 +33,8 @@ def _builtin_formats(tables: dict, mode: int | None) -> list[tuple[int, int]]:
     formats = tables["formats"].get(mode)
     if not formats:
         return []
-    return [(r, f) for r in formats["res"] for f in cam.LIMITED_FPS.get(r, formats["fps"])]
+    by_res = formats.get("fps_by_res", {})
+    return [(r, f) for r in formats["res"] for f in by_res.get(r) or cam.LIMITED_FPS.get(r, formats["fps"])]
 
 
 def interval_label(tenths: int) -> str:

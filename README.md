@@ -17,6 +17,8 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > on `kill` and finds a camera again after the app was killed. **1.6.4**: the **Osmo Action 4 is tested**
 > (live view, recording, photos, capture modes and gallery, by a user on a Raspberry Pi 4 with Linux), and in
 > Video mode the app sends it the format without the Osmo Nano's aspect step, which the Action 4 refused.
+> **1.6.5** gives the Action 4 menus of its own: its formats per capture mode (4:3 at 4K and 2.7K, up to
+> 240 fps at 1080p) and its photo ratio (4:3 or 16:9).
 > The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
@@ -97,9 +99,12 @@ tested with this app yet. The Pocket 3's thumbnails and downloads need its own W
 it lists its files but doesn't send them (the Gallery says so, with a button to switch).
 
 **Osmo Action 4** (tested by a user since 1.6.3, on a Raspberry Pi 4 with Linux): live view (H.265),
-recording, photos, capture modes, status and gallery. It publishes no list of its formats, so the format
-menus are the Osmo Nano's for now: its 16:9 formats work in Low-Light, Timelapse, Hyperlapse and Slow-mo;
-the photo sizes don't, and 4:3 is not checked yet.
+recording, photos, capture modes, status and gallery. It publishes no list of its formats, so since 1.6.5
+the app offers the Action 4's own, from its manual and the tester's camera reports: in Video 4K, 2.7K and
+1080p 16:9 and 4K and 2.7K 4:3 at 24-60 fps, plus 100-120 fps at 4K and 2.7K 16:9 and up to 240 fps at
+1080p (the rates above 60 fps are not checked yet); Low-Light, Timelapse, Hyperlapse and Slow-mo as the
+camera takes them; photos in 4:3 or 16:9. Field of view, hyperlapse speed and timelapse interval are not
+offered yet.
 
 Other DJI Osmo cameras (Action 5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
 part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. The Osmo 360 is not supported.
