@@ -16,7 +16,7 @@ from PIL import Image
 from camlink import ble, camera as cam, media
 from camlink.datalink import Datalink
 from camlink.duml import Message
-from camlink.models import MODELS, POCKETS, SD_ONLY, TESTED_MODELS
+from camlink.models import MODELS, NANO, POCKETS, SD_ONLY, TESTED_MODELS
 from camlink.protocol import ADDR_GIMBAL, CAMERA_HOST
 from camlink.registry import CameraRegistry
 from camlink.util import data_dir, log
@@ -367,7 +367,7 @@ class App:
         """Resolution + frame rate for the current capture mode (slow-mo adds its speed factor). The camera
         restarts its encoder, so the live view pauses for a few seconds: tell the session watchdog. On the Osmo
         Nano a 4:3 resolution needs the aspect switched to 4:3 first; the Osmo Pockets carry the aspect in
-        the resolution code."""
+        the resolution code. The Osmo Action 4 refuses the aspect setting (E3) and takes the format alone."""
         self.video_grace = time.monotonic() + 12
         mode = self.state.capture_mode()
         model = (self.registry.get(self.target) or {}).get("model_id")
@@ -375,7 +375,7 @@ class App:
         # in Video mode set the aspect explicitly either way.
         if mode != cam.MODE_SLOWMO and model not in POCKETS and (res in cam.RES_4_3 or mode == cam.MODE_VIDEO):
             aspect = self.request(0x02, 0x8E, cam.parameter_tlv_set(cam.ASPECT_TLV, 1 if res in cam.RES_4_3 else 2))
-            if not aspect.get("ok"):
+            if not aspect.get("ok") and (model == NANO or "code" not in aspect):   # not refused: no reply
                 return aspect
         return self.set_setting(0x18, cam.video_format_payload(model, mode, res, fps))
 

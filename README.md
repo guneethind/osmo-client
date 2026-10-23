@@ -1,8 +1,8 @@
 # Osmo Client
 
-Control a **DJI Osmo Nano** or **Osmo Pocket 3** from your computer over Wi-Fi: live view, capture modes,
-photo and video, exposure and format settings, camera status, and a gallery to preview and download your
-files. Runs on **Windows, macOS and Linux**.
+Control a **DJI Osmo Nano**, **Osmo Pocket 3** or **Osmo Action 4** from your computer over Wi-Fi: live
+view, capture modes, photo and video, exposure and format settings, camera status, and a gallery to preview
+and download your files. Runs on **Windows, macOS and Linux**.
 
 > Unofficial and independent: not affiliated with, endorsed or sponsored by DJI. See [Legal](#legal).
 
@@ -14,7 +14,9 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > Pocket 3's picture comes back after a reconnect), adds a Record button and a capture-mode menu to every
 > tile, and fixes an Osmo Pocket 3 gallery that sometimes listed no files. **1.6.3** shows the **Osmo
 > Action 4**'s live view (H.265; before, it linked but never showed a picture), and on Linux stops cleanly
-> on `kill` and finds a camera again after the app was killed.
+> on `kill` and finds a camera again after the app was killed. **1.6.4**: the **Osmo Action 4 is tested**
+> (live view, recording, photos, capture modes and gallery, by a user on a Raspberry Pi 4 with Linux), and in
+> Video mode the app sends it the format without the Osmo Nano's aspect step, which the Action 4 refused.
 > The **Osmo Pocket 3** is now tested with a real camera: switching between it and another camera, its own
 > format choices (16:9, and 1:1 up to 3K; no 4:3) and its gallery (the newest files for now).
 >
@@ -27,8 +29,8 @@ The app runs locally and opens its page in your browser at <http://127.0.0.1:809
 > field of view and stabilization; timelapse and hyperlapse settings; gallery favorites; a steadier live
 > view. Experimental: the camera can join your Wi-Fi network instead of the computer joining the camera's.
 >
-> Since 1.1: macOS and Linux. macOS is tested end to end with the Osmo Nano; Linux is still being tested on
-> real hardware. Reports are welcome.
+> Since 1.1: macOS and Linux. macOS is tested end to end with the Osmo Nano; Linux with an Osmo Action 4 on a
+> Raspberry Pi 4 (a user's tests). Reports are welcome.
 
 ![Osmo Client: live view with scopes, shutter, capture modes and camera settings](screenshots/main-app.webp)
 
@@ -94,10 +96,13 @@ from the OpenPocketCine project's notes. Tested with a real Osmo Pocket 3; the P
 tested with this app yet. The Pocket 3's thumbnails and downloads need its own Wi-Fi: on a shared network
 it lists its files but doesn't send them (the Gallery says so, with a button to switch).
 
-Other DJI Osmo cameras (Action 4/5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
-part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. An Osmo Action 4 links and reports
-its status (a tester's report), and its live view (H.265) works since 1.6.3, checked against a recording of
-its stream; its settings are not checked yet. The Osmo 360 is not supported.
+**Osmo Action 4** (tested by a user since 1.6.3, on a Raspberry Pi 4 with Linux): live view (H.265),
+recording, photos, capture modes, status and gallery. It publishes no list of its formats, so the format
+menus are the Osmo Nano's for now: its 16:9 formats work in Low-Light, Timelapse, Hyperlapse and Slow-mo;
+the photo sizes don't, and 4:3 is not checked yet.
+
+Other DJI Osmo cameras (Action 5 Pro/6, Pocket 4/4P) use the same protocol and may work, fully or in
+part; the commands were mapped on the Osmo Nano and the Osmo Pocket 3. The Osmo 360 is not supported.
 
 Need the camera as a webcam for video calls? See the companion app,
 **[OsmoCam](https://github.com/luisreysan/osmocam)**.
@@ -225,9 +230,9 @@ The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on m
 
 ## Test your camera
 
-Osmo Client is tested with an Osmo Nano and an Osmo Pocket 3. If you have another Osmo camera (Pocket 4 or
-4P, Action 4, 5 Pro or 6…), a **camera report** shows what works on it and what needs changing, so that it
-can be supported properly:
+Osmo Client is tested with an Osmo Nano, an Osmo Pocket 3 and an Osmo Action 4. If you have another Osmo
+camera (Pocket 4 or 4P, Action 5 Pro or 6…), a **camera report** shows what works on it and what needs
+changing, so that it can be supported properly:
 
 1. Link the camera in the app once as usual (it should show the live view), then close the app.
 2. Start it with `--report` (Osmo Client 1.6.1 or later): `osmo-client.bat --report` on Windows,
