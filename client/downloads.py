@@ -16,12 +16,14 @@ from pathlib import Path
 
 from camlink import media
 from camlink.protocol import CAMERA_HOST
-from camlink.util import log
+from camlink.util import data_dir, log, portable
 
 
 def default_download_dir() -> Path:
     """The user's videos folder, subfolder 'DJI Osmo': Videos on Windows (even when it has been moved),
     Movies on macOS, the desktop's videos folder (XDG) on Linux."""
+    if portable():
+        return data_dir() / "DJI Osmo"
     folder = None
     if sys.platform == "win32":
         with contextlib.suppress(Exception):

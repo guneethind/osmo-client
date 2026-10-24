@@ -24,15 +24,16 @@ import signal
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 from pathlib import Path
 
-from camlink import ble, camera as cam, datalink, models, wifi
+from camlink import __version__, ble, camera as cam, datalink, models, wifi
 from camlink.protocol import CAMERA_HOST
 from camlink.registry import DEFAULT_TRANSPORT, other_transport
-from camlink.util import fine_timer, log
+from camlink.util import data_dir, fine_timer, frozen, has_console, log, setup_streams
 from camlink.video import VideoDecoder
-from client import report
+from client import lifecycle, report
 from client.app import App
 from client.server import start_server
 from client.station import back_to_own_wifi, reach
@@ -46,8 +47,11 @@ class Changed(Exception):
 async def run(args: argparse.Namespace) -> None:
     app = App()
     app.loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
+    lifecycle.install(lambda: app.loop.call_soon_threadsafe(main_task.cancel),   # Quit: page, tray, console, logoff
+                      lambda: app.downloader.folder)
     if sys.platform != "win32":      # `kill` stops like Ctrl+C (on Linux, BlueZ would keep the camera's link)
-        app.loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+        app.loop.add_signal_handler(signal.SIGTERM, main_task.cancel)
     if args.downloads:
         app.downloader.base = Path(args.downloads)
     stop = threading.Event()
@@ -57,11 +61,12 @@ async def run(args: argparse.Namespace) -> None:
     threading.Thread(target=app.media_hold_loop, args=(stop,), daemon=True, name="media-hold").start()
     threading.Thread(target=app.pocket_loop, args=(stop,), daemon=True, name="pocket-controls").start()
     try:
-        start_server(app, args.port)
+        start_server(app, args.port, on_quit=lifecycle.request_quit)
     except OSError as error:
         log(f"Port {args.port} is already in use ({error.strerror or error}): Osmo Client is probably running "
             f"already (http://127.0.0.1:{args.port}/). Close it first, or start this one with --port")
         stop.set()
+        lifecycle.mark_stopped()
         return
     if getattr(args, "report", False):
         report.start(app, decoder, stop)
@@ -355,10 +360,12 @@ async def run(args: argparse.Namespace) -> None:
             with contextlib.suppress(Exception):
                 await link.close()
         log("Stopped.")
+        lifecycle.mark_stopped()
 
 
 def main() -> None:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    windowless = frozen() and not has_console()      # the packaged app's windowed program
+    setup_streams()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8091, help="port of the local page (default 8091)")
     parser.add_argument("--address", help="Bluetooth address of the camera, as the page lists it (default: the "
@@ -379,11 +386,29 @@ def main() -> None:
     parser.add_argument("--allow-delete", action="store_true", help=argparse.SUPPRESS)   # 1.3.0: deleting was opt-in
     parser.add_argument("--join-timeout", type=float, default=45)
     parser.add_argument("--approve-timeout", type=float, default=90)
+    args = parser.parse_args()
+    if sys.platform == "win32" and frozen():
+        from client import shell_windows as shell
+        if not shell.single_instance(args.port):
+            # Already running (a second double-click): show its page instead of failing on the port.
+            log(f"Osmo Client is already running (http://127.0.0.1:{args.port}/)")
+            if not args.no_browser:
+                webbrowser.open(f"http://127.0.0.1:{args.port}/")
+            return
+        shell.watch_console_events()
+        if windowless:
+            shell.start_tray(args.port, lifecycle.downloads_folder, __version__)
     try:
         with fine_timer():
-            asyncio.run(run(parser.parse_args()))
+            asyncio.run(run(args))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
+    except Exception:  # noqa: BLE001 - last resort: say why, where there is no console to show it
+        log("Osmo Client stopped on an unexpected error:\n" + traceback.format_exc())
+        if windowless:
+            shell.show_error("Osmo Client", "Osmo Client stopped on an unexpected error. Details are in "
+                                            f"{data_dir() / 'logs' / 'osmo-client.log'}")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

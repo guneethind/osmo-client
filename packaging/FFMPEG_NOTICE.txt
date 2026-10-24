@@ -1,0 +1,17 @@
+
+=====================================================================================
+FFmpeg, x264 and x265 (inside PyAV's libraries, the "av.libs" folder)
+=====================================================================================
+Osmo Client decodes the camera's live view with PyAV, whose Windows wheel carries a build of FFmpeg that includes
+the GPL-licensed x264 and x265 libraries. That build, and so the libraries shipped here, is therefore covered by
+the GNU General Public License, version 2 or later (https://www.gnu.org/licenses/old-licenses/gpl-2.0.html and
+https://www.gnu.org/licenses/gpl-3.0.html). Osmo Client's own code (MIT) calls those libraries only as separate,
+dynamically loaded files; it does not encode video with them.
+
+Corresponding source code for the exact versions shipped:
+  FFmpeg   https://ffmpeg.org/download.html
+  x264     https://www.videolan.org/developers/x264.html
+  x265     https://bitbucket.org/multicoreware/x265_git
+  PyAV     https://github.com/PyAV-Org/PyAV  (the wheel's build scripts are in the same repository)
+Each library's version is in the file name in the "_internal\av.libs" folder; ask for the matching source at
+https://github.com/guneethind/osmo-client/issues if you cannot find it at those addresses.

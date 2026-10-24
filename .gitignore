@@ -6,3 +6,7 @@ venv/
 *.h264
 vcam_frame.jpg
 cameras.json
+
+build/
+dist/
+*.spec.bak

@@ -52,7 +52,15 @@ endorsed by or sponsored by DJI.
 ## Dependencies
 
 Installed with pip from `requirements.txt` the first time the app runs; none of them are included in
-this repository.
+this repository. The Windows installer and portable zip include them (plus Python, PyInstaller's
+bootloader and the Windows Runtime projections that bleak uses, `winrt-*`, MIT): the exact list with every
+license text is in `licenses\THIRD_PARTY_LICENSES.txt` inside the program folder.
+
+**FFmpeg in the Windows download.** PyAV's Windows wheel carries a build of FFmpeg that includes the
+GPL-licensed x264 and x265 libraries, so those libraries (the `av.libs` folder) are distributed under the
+GNU General Public License, version 2 or later. Osmo Client's own code stays MIT: it only decodes video
+through them and loads them as separate files. Where to get the matching source code is listed at the end
+of `licenses\THIRD_PARTY_LICENSES.txt`.
 
 | package | license |
 |---|---|

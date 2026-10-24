@@ -224,7 +224,9 @@ def _decode(raw: bytes) -> str:
 
 
 def _netsh(*args: str) -> subprocess.CompletedProcess:
-    result = subprocess.run(["netsh", "wlan", *args], capture_output=True)
+    # No console window of its own: the packaged app has none, and Windows would open one for each call.
+    result = subprocess.run(["netsh", "wlan", *args], capture_output=True, stdin=subprocess.DEVNULL,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
     return subprocess.CompletedProcess(result.args, result.returncode, _decode(result.stdout), _decode(result.stderr))
 
 

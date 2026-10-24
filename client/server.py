@@ -12,19 +12,30 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from camlink import camera as cam, media
-from camlink.util import log
+from camlink.util import log, resource_path
 
 from .app import App
 from .downloads import open_folder
 
-PAGE_FILE = Path(__file__).resolve().parent / "web" / "index.html"
+PAGE_FILE = resource_path("client", "web", "index.html")
 WEB_FILES = {"/monitor.js": ("monitor.js", "text/javascript; charset=utf-8")}   # other files the page loads
 CONTENT_TYPES = {"LRF": "video/mp4", "MP4": "video/mp4", "THM": "image/jpeg", "JPG": "image/jpeg"}
+
+
+def request_allowed(host: str | None, origin: str | None, port: int) -> bool:
+    """Whether a request may be answered: it must name this server (a web page on another site that points
+    its own name at 127.0.0.1, DNS rebinding, sends its own Host) and, when the browser says where it comes
+    from, come from this server's own page (another site's form or script can post to 127.0.0.1)."""
+    names = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    if (host or "").lower() not in names:
+        return False
+    return origin is None or origin.lower() in {f"http://{n}" for n in names}
 
 
 def _builtin_formats(tables: dict, mode: int | None) -> list[tuple[int, int]]:
@@ -144,10 +155,19 @@ class _Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def start_server(app: App, port: int) -> ThreadingHTTPServer:
+def start_server(app: App, port: int, on_quit: Callable[[], None] | None = None) -> ThreadingHTTPServer:
+    """`on_quit` is called when the page asks the app to stop (POST /api/quit)."""
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args) -> None:
             pass
+
+        def parse_request(self) -> bool:
+            if not super().parse_request():
+                return False
+            if request_allowed(self.headers.get("Host"), self.headers.get("Origin"), port):
+                return True
+            self.send_error(403, "this page only answers requests from its own address")
+            return False
 
         def _json(self, obj: dict, code: int = 200) -> None:
             body = json.dumps(obj).encode()
@@ -474,6 +494,10 @@ def start_server(app: App, port: int) -> ThreadingHTTPServer:
             elif path == "/api/media/clear":
                 app.downloader.clear_finished()
                 self._json({"ok": True})
+            elif path == "/api/quit":
+                self._json({"ok": on_quit is not None})
+                if on_quit is not None:
+                    on_quit()
             elif path == "/api/media/open-folder":
                 folder = app.downloader.folder
                 folder.mkdir(parents=True, exist_ok=True)

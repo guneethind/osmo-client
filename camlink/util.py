@@ -14,9 +14,65 @@ def log(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
+def frozen() -> bool:
+    """Running from the packaged Windows build (PyInstaller) and not from the source tree."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def has_console() -> bool:
+    """A console window belongs to this process (always true when run from source in a terminal, and for the
+    packaged console program; false for the windowed program, even when a terminal started it)."""
+    window = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    return True if window is None else bool(window.GetConsoleWindow())
+
+
+def app_dir() -> Path:
+    """The folder of the packaged program, or of the source tree."""
+    return Path(sys.executable).resolve().parent if frozen() else Path(__file__).resolve().parent.parent
+
+
+def resource_path(*parts: str) -> Path:
+    """A file shipped with the app (the web page), in the source tree or in the packaged build."""
+    root = Path(getattr(sys, "_MEIPASS", "")) if frozen() else Path(__file__).resolve().parent.parent
+    return root.joinpath(*parts)
+
+
+def portable() -> bool:
+    """The packaged build was unpacked with its `portable.txt` beside it: keep everything it writes (linked
+    cameras, logs, downloads) in a `data` folder next to the program, and nothing on the computer."""
+    return frozen() and (app_dir() / "portable.txt").is_file()
+
+
+def setup_streams() -> None:
+    """The windowed Windows build has no console, so sys.stdout and sys.stderr are None: send them to the log
+    file (logs/osmo-client.log in the data folder, restarted when it passes 1 MB, the last one kept as
+    .old). With a console, only make the output UTF-8."""
+    if sys.stdout is not None and sys.stderr is not None:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        return
+    folder = data_dir() / "logs"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "osmo-client.log"
+        if path.exists() and path.stat().st_size > 1_000_000:
+            path.replace(path.with_suffix(".old"))
+        stream = open(path, "a", encoding="utf-8", errors="replace", buffering=1)   # noqa: SIM115 - lives as long as the app
+    except OSError:
+        stream = open(os.devnull, "w", encoding="utf-8")                              # noqa: SIM115
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+
+
 def data_dir() -> Path:
     """Per-user folder for settings shared by both apps (linked cameras): %LOCALAPPDATA%\\osmo-pc on
-    Windows, ~/Library/Application Support/osmo-pc on macOS, ~/.local/share/osmo-pc on Linux."""
+    Windows, ~/Library/Application Support/osmo-pc on macOS, ~/.local/share/osmo-pc on Linux. The portable
+    build keeps it in a `data` folder next to the program (see portable())."""
+    if portable():
+        folder = app_dir() / "data"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA")
         root = Path(base) if base else Path.home() / "AppData" / "Local"

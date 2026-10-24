@@ -143,7 +143,8 @@ Need the camera as a webcam for video calls? See the companion app,
   - **Windows** 10 or 11.
   - **macOS** 12 or newer.
   - **Linux** with **NetworkManager** (Ubuntu, Fedora, Mint, Debian desktop and most others) and BlueZ.
-- **[Python](https://www.python.org/downloads/) 3.10 to 3.14** (3.14 recommended). Python 3.15 is too
+- **[Python](https://www.python.org/downloads/) 3.10 to 3.14** (3.14 recommended), except for the
+  Windows installer and portable zip, which include everything. Python 3.15 is too
   new for now: some of the libraries used here have no build for it yet. If you already installed 3.15,
   install 3.14 as well: with several versions installed, the app picks the newest from 3.10 to 3.14 by
   itself.
@@ -158,15 +159,47 @@ app at a time).
 
 ### Windows
 
-1. Install **Python 3.14** from <https://www.python.org/downloads/windows/>.
-2. Download the [latest release](https://github.com/luisreysan/osmo-client/releases/latest)
-   (**Source code (zip)**) and extract it.
-3. Double-click **`osmo-client.bat`**. The first run takes a minute: it creates a private Python
-   environment and installs the requirements. Then the page opens in your browser.
-4. Pick your camera under **Nearby** and click **Link**. The camera shows **"OSMO"**: approve it on the
+No Python needed. Download one of these from the
+[latest release](https://github.com/guneethind/osmo-client/releases/latest) (Windows 10 or 11, 64-bit):
+
+- **`OsmoClient-<version>-setup.exe`**: installer for your user account (no administrator rights).
+  It adds a Start menu entry; a desktop shortcut and "start with Windows" are optional.
+  For a managed deployment: `OsmoClient-<version>-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
+- **`OsmoClient-<version>-windows-x64-portable.zip`**: nothing to install. Unzip it to a short path
+  (for example `C:\OsmoClient`; the Windows Bluetooth libraries fail from long paths) and run
+  **`OsmoClient.exe`**. Everything it writes (linked cameras, logs, files copied from the camera) stays
+  in the `data` folder beside it. Delete `portable.txt` from the folder to use the normal per-user folders.
+
+Then:
+
+1. Start **Osmo Client**. A tray icon appears (next to the clock) and the page opens in your browser.
+   Starting it again just opens the page.
+2. Pick your camera under **Nearby** and click **Link**. The camera shows **"OSMO"**: approve it on the
    camera screen within ~20 seconds.
 
-Stop with **Ctrl+C** in the console window: the PC's Wi-Fi goes back to the network it was on.
+Stop with **Quit** on the page, or right-click the tray icon and choose **Quit**: the PC's Wi-Fi goes
+back to the network it was on. Closing the console window of `OsmoClient-console.exe` or signing out
+of Windows does the same.
+
+`OsmoClient-console.exe` is the same program with a console window, for the options below (`--report`,
+`--help`...). The log of the normal program is in `%LOCALAPPDATA%\osmo-pc\logs\osmo-client.log` (in
+`data\logs` for the portable one).
+
+**"Windows protected your PC" / blocked as unknown:** the downloads are not code-signed yet, so
+SmartScreen warns on first start: click **More info**, then **Run anyway**. With *Smart App Control*
+turned on, Windows may refuse unsigned programs outright; use the Python route below, or turn it off
+(a Windows setting you choose; it cannot be turned back on without resetting Windows). Check a download
+against `SHA256SUMS.txt` in the release, or with `gh attestation verify <file> --repo guneethind/osmo-client`.
+Windows on ARM runs the 64-bit build under emulation; it is untested.
+
+#### Run from source (Python)
+
+1. Install **Python 3.14** from <https://www.python.org/downloads/windows/>.
+2. Download the source (**Source code (zip)**) from the release page and extract it.
+3. Double-click **`osmo-client.bat`**. The first run takes a minute: it creates a private Python
+   environment and installs the requirements. Then the page opens in your browser.
+
+Stop with **Quit** on the page or **Ctrl+C** in the console window.
 
 ### macOS
 
@@ -217,7 +250,7 @@ updated only when the requirements change).
 
 ### Options
 
-The same on every system (`osmo-client.bat` on Windows, `sh osmo-client.sh` on macOS and Linux):
+The same on every system (`OsmoClient-console.exe` or `osmo-client.bat` on Windows, `sh osmo-client.sh` on macOS and Linux):
 
 ```
 --off                     start disconnected (connect from the page)
@@ -240,7 +273,7 @@ camera (Pocket 4 or 4P, Action 5 Pro or 6…), a **camera report** shows what wo
 changing, so that it can be supported properly:
 
 1. Link the camera in the app once as usual (it should show the live view), then close the app.
-2. Start it with `--report` (Osmo Client 1.6.1 or later): `osmo-client.bat --report` on Windows,
+2. Start it with `--report` (Osmo Client 1.6.1 or later): `OsmoClient-console.exe --report` (or `osmo-client.bat --report`) on Windows,
    `sh osmo-client.sh --report` on macOS and Linux.
 3. Once the live view is up, leave the camera and the page alone for about ten minutes. The camera switches
    through its capture modes, formats and color profiles by itself; at the end everything is put back as it

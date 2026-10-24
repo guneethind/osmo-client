@@ -1,0 +1,7 @@
+# Input of requirements-windows.lock (what the Windows release is built from). Regenerate with:
+#   python -m pip install pip-tools
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras -o packaging/requirements-windows.lock packaging/requirements-windows.in
+-r ../requirements.txt
+pyinstaller>=6.22,<7
+pyinstaller-hooks-contrib
+pip-licenses>=5

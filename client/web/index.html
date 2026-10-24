@@ -460,6 +460,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg>
     <span id="powerText">Disconnect</span>
   </button>
+  <button class="power" id="quit" type="button" title="Stop Osmo Client: releases the camera and puts the computer's Wi-Fi back on your network">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>Quit</span>
+  </button>
 </header>
 
 <main>
@@ -1172,6 +1176,15 @@ async function setLink(on) {
     activity(on ? 'Connecting to the camera' : extra.cameras ? `Disconnected: ${extra.cameras + 1} cameras released` : 'Disconnected: camera released', 'info');
   } finally { linkBusy = false; render(); }
 }
+// ---- quit: stops the app (its clean-up puts the computer's Wi-Fi back) and says so on the page
+async function quitApp() {
+  const extra = (S && S.multiview) || { cameras: 0, recording: 0 };
+  const recording = (isRecording() ? 1 : 0) + extra.recording;
+  if (!confirm(`${recording ? `${recording > 1 ? `${recording} cameras are` : 'A camera is'} recording (they keep recording). ` : ''}Quit Osmo Client? The camera is released and your computer's Wi-Fi is put back.`)) return;
+  try { await fetch('/api/quit', { method: 'POST' }); } catch (e) { /* the app may already be gone */ }
+  document.body.innerHTML = '<div style="font:16px system-ui,sans-serif;max-width:32rem;margin:20vh auto;padding:0 1rem;text-align:center"><h2>Osmo Client has stopped</h2><p>Your computer\'s Wi-Fi is being put back on your network. You can close this tab. To use the app again, start it from the Start menu or the file you downloaded.</p></div>';
+}
+$('quit').addEventListener('click', quitApp);
 // ---- exposure (per capture mode; ISO and shutter only in Manual)
 // What the current capture mode offers. The camera publishes it (and again whenever it changes); the page
 // asks again whenever the status shows a new table or another capture mode.
