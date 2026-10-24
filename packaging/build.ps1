@@ -13,7 +13,10 @@ $venv = Join-Path $build 'venv'
 $python = Join-Path $venv 'Scripts\python.exe'
 
 function Invoke-Checked([scriptblock]$Command, [string]$What) {
-    & $Command
+    # Windows PowerShell 5.1 turns a native program's stderr output (PyInstaller logs there) into an error.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Command } finally { $ErrorActionPreference = $previous }
     if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)" }
 }
 

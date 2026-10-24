@@ -23,6 +23,7 @@ function Get-Http([string]$path, [hashtable]$headers = @{}, [string]$method = 'G
 # Data goes to a temporary folder: beside the program in portable mode, else LOCALAPPDATA is redirected.
 $data = Join-Path ([IO.Path]::GetTempPath()) "osmo-smoke-$([guid]::NewGuid().ToString('N').Substring(0,8))"
 New-Item -ItemType Directory -Force $data | Out-Null
+$realLocalAppData = $env:LOCALAPPDATA
 $env:LOCALAPPDATA = $data
 $portable = Test-Path (Join-Path (Split-Path $program) 'portable.txt')
 $logFolder = if ($portable) { Join-Path (Split-Path $program) 'data\logs' } else { Join-Path $data 'osmo-pc\logs' }
@@ -56,6 +57,7 @@ try {
     }
 } finally {
     if (-not $process.HasExited) { $process.Kill() }
+    $env:LOCALAPPDATA = $realLocalAppData      # a script shares its caller's environment
 }
 $log = Join-Path $logFolder 'osmo-client.log'
 if (Test-Path $log) { Check (-not (Select-String -Path $log -Pattern 'Traceback' -Quiet)) 'no traceback in the log' }
