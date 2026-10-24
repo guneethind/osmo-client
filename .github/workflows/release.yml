@@ -5,6 +5,7 @@ name: Windows release
 on:
   push:
     tags: ["v*"]
+    branches: [feature/windows-exe-release]   # TEMPORARY: dry run of the build before it is on main
   workflow_dispatch:
 
 permissions:
